@@ -664,6 +664,7 @@ rule get_PRS_variants:
 rule get_rohs:
 	input:
 		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
+		vcf_no_QC="data/normalized/df3_norm.vcf.gz"
 	output:		
 		ROH_file="data/ROH/test_roh.tsv.gz",
 		outfile2="data/ROH/another_file.txt" # you can add many more files like this
@@ -677,6 +678,7 @@ rule get_rohs:
 		"""
 		mkdir -p {params.out_dir}
 		#mkdir -p {params.tmp_dir}
+		
 		# local SSD Scratch would be available in: $SCRATCH_DIR
 		
 		# the code here could e.g. look like this:
@@ -686,9 +688,10 @@ rule get_rohs:
 		# this would translate to
 		bcftools roh data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz --AF-tag AF -G30 --threads 12 | \
 		grep "RG" | grep 'chr[1-22]' | gzip > data/ROH/test_roh.tsv.gz
-		
+				
 		# the second filename that is defined as output could be accessed like this:
 		touch {output.outfile2}
 		
+		# you could also use the vcf that did not underwent QC, this could be accessed by {input.vcf_no_QC}
 		# Have fun! You can also add more rules.
 		"""
