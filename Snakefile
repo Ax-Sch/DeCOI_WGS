@@ -677,6 +677,7 @@ rule get_rohs:
 		"""
 		mkdir -p {params.out_dir}
 		#mkdir -p {params.tmp_dir}
+		# local SSD Scratch would be available in: $SCRATCH_DIR
 		
 		# the code here could e.g. look like this:
 		bcftools roh {input.vcf_for_GWAS} --AF-tag AF -G30 --threads 12 | \
