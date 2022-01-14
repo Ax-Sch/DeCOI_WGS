@@ -13,13 +13,14 @@ rule all:
 		"data/normalized/df3_norm.vcf.gz",
 		"data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
 		#expand("data/pop_vcf/{population}_vcf_rel.vcf.bgz", population=config["populations"]),
-		expand("data/regenie_pheno/fam_{population}_{phenotypes}.fam", population=config["populations"], phenotypes=config["phenotypes"]),
-		expand("data/additional_QC/{population}_{phenotypes}/not_rel_QCed.bim", population=config["populations"], phenotypes=config["phenotypes"]),
-		expand("data/PCAcovar/{phenotypes}_{population}_PCA.eigenvec", population=config["populations"], phenotypes=config["phenotypes"]),
-		expand("data/regenie_pheno/cov_{phenotypes}_{population}", population=config["populations"], phenotypes=config["phenotypes"]),
-		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie", population=config["populations"], phenotypes=config["phenotypes"]),
-		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_Pval_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
+		#expand("data/regenie_pheno/fam_{population}_{phenotypes}.fam", population=config["populations"], phenotypes=config["phenotypes"]),
+		#expand("data/additional_QC/{population}_{phenotypes}/not_rel_QCed.bim", population=config["populations"], phenotypes=config["phenotypes"]),
+		#expand("data/PCAcovar/{phenotypes}_{population}_PCA.eigenvec", population=config["populations"], phenotypes=config["phenotypes"]),
+		#expand("data/regenie_pheno/cov_{phenotypes}_{population}", population=config["populations"], phenotypes=config["phenotypes"]),
+		#expand("data/regenie/GWAS_{population}_{phenotypes}.regenie", population=config["populations"], phenotypes=config["phenotypes"]),
+		#expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_Pval_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
 		"data/PRS/variants_for_prs.vcf.gz",
+		"data/PCA/populations.txt"
 
 		
 # normalize the vcf file and annotate it with the ID: CHROM:POS:REF:ALT
@@ -45,7 +46,7 @@ rule normalize_vcf_annotate_bcftools:
 		"""
 
 # Just calculate sample QC-data using hail
-rule HAIL_gather_QC_data:
+rule GatherSampleQCData:
 	input:
 		"data/normalized/df3_norm.vcf.gz"
 	output:
@@ -58,58 +59,24 @@ rule HAIL_gather_QC_data:
 		path_output="data/hail_gather_data"
 	shell:
 		"""
-		# set up spark cluster
-		mkdir -p {params.path_output}
+		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
-		export LC_ALL="en_US.UTF-8"
+		
+		hail_python_script="scripts/QC_HAIL_gather_data.py $(pwd)/{input} $(pwd)/{params.tmp_dir} $(pwd)/{output.sample_qc_file} $(pwd)"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		
-		echo "Setting up Spark Cluster."
-		export SPARK_LOCAL_DIRS=$(pwd)/{params.tmp_dir}
-		export PATH={config[PATH]}
-		export PYTHONPATH={config[PYTHONPATH]}
-		HAIL_HOME=$(pip3 show hail | grep Location | awk -F' ' '{{print $2 "/hail"}}')
-		export SPARK_CLASSPATH=$HAIL_HOME"/backend/hail-all-spark.jar"		
-		echo "Env variables set."
-		# start spark master in this job, add one worker that will definitely start
-		{config[spark_master_path]}
-		{config[spark_worker_path]} "spark://${{SLURMD_NODENAME}}.cluster.imbie:7077" --cores 2
-		
-		# add addtitional workers, save job-ids and add a bash trap to cancel them, when this process stops
-		slurm_id=""
-		for i in {{1..20}}
-		do
-		   slurm_id="$slurm_id "$(sbatch --time=12:00:00 -J spark_worker --ntasks=1 --partition=batch \
-		   --mem=84G --cpus-per-task=24 \
-		   --chdir=$(pwd) \
-		   --wrap "{config[spark_worker_path]} spark://${{SLURMD_NODENAME}}.cluster.imbie:7077; sleep 12h" | awk '{{print $NF}}')
-		done
-		
-		echo "started workers as jobs:"
-		echo $slurm_id
-		trap "scancel $slurm_id" EXIT
-		
-		# submit the hail script
-		
-		spark-submit \
-		--jars $HAIL_HOME/backend/hail-all-spark.jar \
-		--conf spark.driver.extraClassPath=$HAIL_HOME/backend/hail-all-spark.jar \
-		--conf spark.executor.extraClassPath=./backend/hail-all-spark.jar \
-		--conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
-		--conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator \
-		--conf spark.local.dir=$(pwd)/{params.tmp_dir} \
-		--master spark://${{SLURMD_NODENAME}}.cluster.imbie:7077 \
-		scripts/QC_HAIL_gather_data.py $(pwd)/{input} $(pwd)/{params.tmp_dir} $(pwd)/{output.sample_qc_file} $(pwd)
+		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		source scripts/spark_submit_command.sh
+		$spark_submit_command \
+		$hail_python_script
 		
 		else
-    		echo "Running locally."
-    		python scripts/QC_HAIL_gather_data.py $(pwd)/{input} $(pwd)/{params.tmp_dir} $(pwd)/{output.sample_qc_file} $(pwd)
+		python $hail_python_script
 		fi
 		"""
 
 # reformat the hail sample QC file, generate histograms of all values, generate a list of samples passing the sample QC thresholds 
-rule QC_HAIL_convert_plot_data:
+rule ReformatPlotSampleQC:
 	input:
 		"data/hail_gather_data/sampleqc.tsv",
 	output:
@@ -133,7 +100,7 @@ rule QC_HAIL_convert_plot_data:
 
 
 # do sample QC based on the list generated from above, do variant QC, filter for variants >0.1% AF (=AC>2)
-rule QC_HAIL_generate_plink_files_forGWAS:
+rule DoFirstSampleVariantQC:
 	input:
 		vcf="data/normalized/df3_norm.vcf.gz",
 		table="data/hail_gather_data/for_sample_QC.tsv",
@@ -147,54 +114,19 @@ rule QC_HAIL_generate_plink_files_forGWAS:
 		path_output="data/HAIL_GWAS_vcf"
 	shell:
 		"""
-		# set up spark cluster
-		mkdir -p {params.path_output}
+		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
-		export LC_ALL="en_US.UTF-8"
+		
+		hail_python_script="scripts/QC_HAIL_generate_plink_files_forGWAS.py $(pwd)/{input.vcf} $(pwd)/{params.tmp_dir} $(pwd)/{input.table} $(pwd)/{input.hail_dir} $(pwd)/{output}"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		
-		echo "Setting up Spark Cluster."
-		export SPARK_LOCAL_DIRS=$(pwd)/{params.tmp_dir}
-		export PATH={config[PATH]}
-		export PYTHONPATH={config[PYTHONPATH]}
-		HAIL_HOME=$(pip3 show hail | grep Location | awk -F' ' '{{print $2 "/hail"}}')
-		export SPARK_CLASSPATH=$HAIL_HOME"/backend/hail-all-spark.jar"		
-		echo "Env variables set."
-		# start spark master in this job, add one worker that will definitely start
-		{config[spark_master_path]}
-		{config[spark_worker_path]} "spark://${{SLURMD_NODENAME}}.cluster.imbie:7077" --cores 2
-		
-		# add addtitional workers, save job-ids and add a bash trap to cancel them, when this process stops
-		slurm_id=""
-		for i in b203eth0 b204eth0 b205eth0 b206eth0 b207eth0 b208eth0 b209eth0 b210eth0 b211eth0 b212eth0 b213eth0 b214eth0 b203eth0 b204eth0 b205eth0 b206eth0 b207eth0 b208eth0 b209eth0 b210eth0 b211eth0 b212eth0 b213eth0 b214eth0 b203eth0 b204eth0 b205eth0 b206eth0 b207eth0 b208eth0 b209eth0 b210eth0 b211eth0 b212eth0 b213eth0 b214eth0
-		do
-		   slurm_id="$slurm_id "$(sbatch --time=12:00:00 -J spark_worker --ntasks=1 --partition=batch \
-		   --mem=28G --cpus-per-task=8 \
-		   --chdir=$(pwd) \
-		   -w $i \
-		   --wrap "{config[spark_worker_path]} spark://${{SLURMD_NODENAME}}.cluster.imbie:7077; sleep 12h" | awk '{{print $NF}}')
-		done
-		
-		echo "started workers as jobs:"
-		echo $slurm_id
-		trap "scancel $slurm_id" EXIT
-		
-		# submit the hail script
-		
-		spark-submit \
-		--jars $HAIL_HOME/backend/hail-all-spark.jar \
-		--conf spark.driver.extraClassPath=$HAIL_HOME/backend/hail-all-spark.jar \
-		--conf spark.executor.extraClassPath=./backend/hail-all-spark.jar \
-		--conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
-		--conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator \
-		--conf spark.local.dir=$(pwd)/{params.tmp_dir} \
-		--master spark://${{SLURMD_NODENAME}}.cluster.imbie:7077 \
-		scripts/QC_HAIL_generate_plink_files_forGWAS.py $(pwd)/{input.vcf} $(pwd)/{params.tmp_dir} $(pwd)/{input.table} $(pwd)/{input.hail_dir} $(pwd)/{output}
+		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		source scripts/spark_submit_command.sh
+		$spark_submit_command \
+		$hail_python_script
 		
 		else
-    		echo "Running locally."
-    		python scripts/QC_HAIL_generate_plink_files_forGWAS.py $(pwd)/{input.vcf} $(pwd)/{params.tmp_dir} $(pwd)/{input.table} $(pwd)/{input.hail_dir} $(pwd)/{output}
+		python $hail_python_script
 		fi
 		"""
 
@@ -333,7 +265,7 @@ rule merge_data_w_1000G_run_PCA:
 
 		"""
 		
-rule relatedness_filter:
+rule ApplyRelatednessFilter:
 	input:
 		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
 		populations="data/PCA/populations.txt",
@@ -350,59 +282,21 @@ rule relatedness_filter:
 		pop_vcf_rel="data/pop_vcf/{population}_vcf_rel.vcf.bgz",
 		pop_vcf_not_rel="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz",
 	shell:
-		"""
-		# set up spark cluster
+		"""		
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
-		export LC_ALL="en_US.UTF-8"
+		
+		hail_python_script="scripts/relatedness_filter.py $(pwd)/{input.vcf_for_GWAS} $(pwd)/{params.tmp_dir} $(pwd)/{input.populations} $(pwd)/{input.pheno_file} $(pwd)/{params.pop_vcf_rel} $(pwd)/{params.pop_vcf_not_rel} $(pwd)/{params.out_dir} {wildcards.population}"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		export SPARK_LOCAL_DIRS=$SCRATCH_DIR
+		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		source scripts/spark_submit_command.sh
+		$spark_submit_command \
+		$hail_python_script
 		
-		echo "Setting up Spark Cluster."
-		export PATH={config[PATH]}
-		export PYTHONPATH={config[PYTHONPATH]}
-		HAIL_HOME=$(pip3 show hail | grep Location | awk -F' ' '{{print $2 "/hail"}}')
-		export SPARK_CLASSPATH=$HAIL_HOME"/backend/hail-all-spark.jar"		
-		echo "Env variables set."
-		# start spark master in this job, add one worker that will definitely start
-		{config[spark_master_path]}
-		#{config[spark_worker_path]} "spark://${{SLURMD_NODENAME}}.cluster.imbie:7077" --cores 2
-		
-		# add addtitional workers, save job-ids and add a bash trap to cancel them, when this process stops
-		slurm_id=""
-		for i in b311eth0 b312eth0 b313eth0 b314eth0
-		do
-		   slurm_id="$slurm_id "$(sbatch --time=7-00:00:00 -J spark_worker --ntasks=1 --partition=long \
-		   --mem=180G --cpus-per-task=22 \
-		   --chdir=$(pwd) \
-		   --gres localtmp:400G \
-		   -w $i \
-		   --wrap "source $(pwd)/scripts/LOCAL_DIR.sh; {config[spark_worker_path]} spark://${{SLURMD_NODENAME}}.cluster.imbie:7077; sleep 12h" | awk '{{print $NF}}')
-		done
-		
-		echo "started workers as jobs:"
-		echo $slurm_id
-		trap "scancel $slurm_id" EXIT
-		
-		# submit the hail script
-		
-		spark-submit \
-		--jars $HAIL_HOME/backend/hail-all-spark.jar \
-		--conf spark.driver.extraClassPath=$HAIL_HOME/backend/hail-all-spark.jar \
-		--conf spark.executor.extraClassPath=./backend/hail-all-spark.jar \
-		--conf spark.serializer=org.apache.spark.serializer.KryoSerializer \
-		--conf spark.kryo.registrator=is.hail.kryo.HailKryoRegistrator \
-		--conf spark.driver.memory=80G \
-		--conf spark.executor.memory=170G \
-		--master spark://${{SLURMD_NODENAME}}.cluster.imbie:7077 \
-		scripts/relatedness_filter.py $(pwd)/{input.vcf_for_GWAS} $(pwd)/{params.tmp_dir} $(pwd)/{input.populations} $(pwd)/{input.pheno_file} $(pwd)/{params.pop_vcf_rel} $(pwd)/{params.pop_vcf_not_rel} $(pwd)/{params.out_dir} {wildcards.population}
 		else
-    		echo "Running locally."
-		python scripts/relatedness_filter.py $(pwd)/{input.vcf_for_GWAS} $(pwd)/{params.tmp_dir} $(pwd)/{input.populations} $(pwd)/{input.pheno_file} $(pwd)/{params.pop_vcf_rel} $(pwd)/{params.pop_vcf_not_rel} $(pwd)/{params.out_dir} $(pwd) {wildcards.population}
-		fi
-		#tabix -p vcf {params.pop_vcf_rel}
-		#tabix -p vcf {params.pop_vcf_not_rel}
+		python $hail_python_script
+		fi		
 		"""
 
 rule generate_pheno_files_for_GWAS:
@@ -423,7 +317,7 @@ rule generate_pheno_files_for_GWAS:
 		"""
 
 
-rule additional_QC_prior_to_each_analysis:
+rule additional_GWAS_Specifc_QC:
 	input:
 		bed="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz.bed",
 		bim="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz.bim",
@@ -489,7 +383,7 @@ rule additional_QC_prior_to_each_analysis:
 
 		"""
 
-rule generate_PCA_covar_for_each_analysis:
+rule generate_PCA_covar_for_GWAS:
 	input:
 		bim="data/additional_QC/{population}_{pheno}/not_rel_QCed.bim",
 		bed="data/additional_QC/{population}_{pheno}/not_rel_QCed.bed",
@@ -533,7 +427,7 @@ rule generate_PCA_covar_for_each_analysis:
 		"""
 
 
-rule generate_covar_files_for_each_analysis:
+rule generate_covar_files_GWAS:
 	input:
 		PCA_cov="data/PCAcovar/{pheno}_{population}_PCA.eigenvec",
 		xl_file="config/post_df3_HGI_sample_QC_summary.xlsx"
@@ -547,7 +441,7 @@ rule generate_covar_files_for_each_analysis:
 		Rscript scripts/generate_covar_file.R {input.xl_file} {input.PCA_cov} {output}
 		"""
  
-rule GWAS_with_regenie:
+rule Do_GWAS_with_regenie:
 	input:
 		pathCov="data/regenie_pheno/cov_{pheno}_{population}",
 		pathPheno="data/regenie_pheno/pheno_{population}_{pheno}",
@@ -631,13 +525,13 @@ rule generate_qq_plots:
 
 
 
-rule get_PRS_variants:
+rule Extract_PRS_variants:
 	input:
 		mt_table=directory(config["tmp_folder"] + "hail_gather_data_IN"),
 		prs_file="resources/hg38.PRS.tsv"
 	output:		
 		vcf_for_PRS="data/PRS/variants_for_prs.vcf.gz"
-	resources: cpus=12, mem_mb=48000, time_job=720, additional=" -w g101eth0 --gres localtmp:200G --ntasks=1 "
+	resources: cpus=12, mem_mb=48000, time_job=720, additional=" -w b310eth0 --gres localtmp:200G --ntasks=1 "
 	params:
 		partition='batch',
 		out_dir="data/PRS/",
@@ -650,7 +544,7 @@ rule get_PRS_variants:
 		hail_python_script="scripts/hail_get_PRS_variants.py $(pwd)/{input.mt_table} $(pwd)/{params.tmp_dir} $(pwd)/{output} $(pwd)/{input.prs_file} $(pwd)"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		worker_nodes="g101eth0 g101eth0 g101eth0 g101eth0 g101eth0 g101eth0 g101eth0 g101eth0 g101eth0"
+		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
 		source scripts/spark_submit_command.sh
 		$spark_submit_command \
 		$hail_python_script
@@ -661,7 +555,7 @@ rule get_PRS_variants:
 		"""
 
 
-rule get_rohs:
+rule Extract_Rohs:
 	input:
 		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
 		vcf_no_QC="data/normalized/df3_norm.vcf.gz"
