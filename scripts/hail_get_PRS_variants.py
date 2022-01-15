@@ -10,9 +10,7 @@ out_vcf=sys.argv[3] #output[0]
 prs_score=sys.argv[4]
 working_dir=sys.argv[5]
 
-print("working directory: " + working_dir)
-os.chdir(working_dir)
-
+hl.init(tmp_dir=tmp_dir)
 hl._set_flags(no_whole_stage_codegen='1')
 mtAll = hl.read_matrix_table(input_mt)
 mtAll = mtAll.drop("PL")
@@ -27,5 +25,5 @@ mtAll=mtAll.filter_rows(hl.is_defined(mtAll.in_score.f0))
 
 #mtAll.count()
 mtAll.write(tmp_dir + "German_variants", overwrite=True)
-mtAll=hl.read_matrix_table(tmp_dir + "/German_variants")
+mtAll=hl.read_matrix_table(tmp_dir + "German_variants")
 hl.export_vcf(mtAll, out_vcf)

@@ -19,7 +19,7 @@ rule all:
 		#expand("data/regenie_pheno/cov_{phenotypes}_{population}", population=config["populations"], phenotypes=config["phenotypes"]),
 		#expand("data/regenie/GWAS_{population}_{phenotypes}.regenie", population=config["populations"], phenotypes=config["phenotypes"]),
 		#expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_Pval_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
-		"data/PRS/variants_for_prs.vcf.gz",
+		"data/PRS/variants_for_prs.vcf.bgz",
 		"data/PCA/populations.txt"
 
 		
@@ -52,23 +52,23 @@ rule GatherSampleQCData:
 	output:
 		sample_qc_file="data/hail_gather_data/sampleqc.tsv",
 		out_dir=directory(config["tmp_folder"] + "hail_gather_data_IN")
-	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -w b308eth0"
+	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
 	params:
 		partition='long',
 		tmp_dir=config["tmp_folder"],
 		path_output="data/hail_gather_data"
 	shell:
-		"""
+		"""
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
 		hail_python_script="scripts/QC_HAIL_gather_data.py $(pwd)/{input} $(pwd)/{params.tmp_dir} $(pwd)/{output.sample_qc_file} $(pwd)"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=5
 		source scripts/spark_submit_command.sh
-		$spark_submit_command \
-		$hail_python_script
+		$spark_submit_command $hail_python_script
 		
 		else
 		python $hail_python_script
@@ -107,23 +107,23 @@ rule DoFirstSampleVariantQC:
 		hail_dir=directory(config["tmp_folder"] + "hail_gather_data_IN")
 	output:
 		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz"
-	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -w b308eth0"
+	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
 	params:
 		partition='long',
 		tmp_dir=config["tmp_folder"],
 		path_output="data/HAIL_GWAS_vcf"
 	shell:
-		"""
+		"""
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
 		hail_python_script="scripts/QC_HAIL_generate_plink_files_forGWAS.py $(pwd)/{input.vcf} $(pwd)/{params.tmp_dir} $(pwd)/{input.table} $(pwd)/{input.hail_dir} $(pwd)/{output}"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=5
 		source scripts/spark_submit_command.sh
-		$spark_submit_command \
-		$hail_python_script
+		$spark_submit_command $hail_python_script
 		
 		else
 		python $hail_python_script
@@ -282,17 +282,17 @@ rule ApplyRelatednessFilter:
 		pop_vcf_rel="data/pop_vcf/{population}_vcf_rel.vcf.bgz",
 		pop_vcf_not_rel="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz",
 	shell:
-		"""		
+		"""		
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
 		hail_python_script="scripts/relatedness_filter.py $(pwd)/{input.vcf_for_GWAS} $(pwd)/{params.tmp_dir} $(pwd)/{input.populations} $(pwd)/{input.pheno_file} $(pwd)/{params.pop_vcf_rel} $(pwd)/{params.pop_vcf_not_rel} $(pwd)/{params.out_dir} {wildcards.population}"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=5
 		source scripts/spark_submit_command.sh
-		$spark_submit_command \
-		$hail_python_script
+		$spark_submit_command $hail_python_script
 		
 		else
 		python $hail_python_script
@@ -530,24 +530,24 @@ rule Extract_PRS_variants:
 		mt_table=directory(config["tmp_folder"] + "hail_gather_data_IN"),
 		prs_file="resources/hg38.PRS.tsv"
 	output:		
-		vcf_for_PRS="data/PRS/variants_for_prs.vcf.gz"
-	resources: cpus=12, mem_mb=48000, time_job=720, additional=" -w b310eth0 --gres localtmp:200G --ntasks=1 "
+		vcf_for_PRS="data/PRS/variants_for_prs.vcf.bgz"
+	resources: cpus=12, mem_mb=48000, time_job=720, additional=" --gres localtmp:200G --ntasks=1 -x " + config["master_nodes_excluded"]
 	params:
 		partition='batch',
 		out_dir="data/PRS/",
 		tmp_dir=config["tmp_folder"] +"PRS/",
 	shell:
-		"""
+		"""
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
 		hail_python_script="scripts/hail_get_PRS_variants.py $(pwd)/{input.mt_table} $(pwd)/{params.tmp_dir} $(pwd)/{output} $(pwd)/{input.prs_file} $(pwd)"
 		
 		if [ {config[cluster]} = "yes" ]; then
-		worker_nodes="b311eth0 b312eth0 b313eth0 b314eth0 b311eth0 b312eth0 b313eth0 b314eth0"
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=5
 		source scripts/spark_submit_command.sh
-		$spark_submit_command \
-		$hail_python_script
+		$spark_submit_command $hail_python_script
 		
 		else
 		python $hail_python_script
