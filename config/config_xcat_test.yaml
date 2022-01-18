@@ -32,7 +32,7 @@
   - 21
   - 22
  tmp_folder: "tmp/"
- cluster: "yes"
+ cluster: "no"
  master_nodes_excluded: "b101eth0,b102eth0,b103eth0,b104eth0,b105eth0,b106eth0,b107eth0,b201eth0"
  worker_nodes_excluded: "b101eth0,b102eth0,b103eth0,b104eth0,b105eth0,b106eth0,b107eth0,b201eth0"
  PATH: "$(echo \"$PATH\" | sed -e \"s>\/gpfs01\/share\/conda\/condabin:\/gpfs01\/share\/conda\/bin:>>\")"

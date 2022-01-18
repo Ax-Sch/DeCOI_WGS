@@ -12,15 +12,15 @@ rule all:
 		"data/hail_gather_data/plot_sampleQC.html",
 		"data/normalized/df3_norm.vcf.gz",
 		"data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
-		#expand("data/pop_vcf/{population}_vcf_rel.vcf.bgz", population=config["populations"]),
-		#expand("data/regenie_pheno/fam_{population}_{phenotypes}.fam", population=config["populations"], phenotypes=config["phenotypes"]),
-		#expand("data/additional_QC/{population}_{phenotypes}/not_rel_QCed.bim", population=config["populations"], phenotypes=config["phenotypes"]),
-		#expand("data/PCAcovar/{phenotypes}_{population}_PCA.eigenvec", population=config["populations"], phenotypes=config["phenotypes"]),
-		#expand("data/regenie_pheno/cov_{phenotypes}_{population}", population=config["populations"], phenotypes=config["phenotypes"]),
-		#expand("data/regenie/GWAS_{population}_{phenotypes}.regenie", population=config["populations"], phenotypes=config["phenotypes"]),
-		#expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_Pval_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/regenie_pheno/fam_{population}_{phenotypes}.fam", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/additional_QC/{population}_{phenotypes}/not_rel_QCed.bim", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/PCAcovar/{phenotypes}_{population}_PCA.eigenvec", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/regenie_pheno/cov_{phenotypes}_{population}", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_Pval_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
 		"data/PRS/variants_for_prs.vcf.bgz",
-		"data/PCA/populations.txt"
+		"data/PCA/populations.txt",
+		multiext("data/ROH/bedForROHAnalysis_ROH", ".hom", ".hom.indiv", ".hom.summary", ".log")
 
 		
 # normalize the vcf file and annotate it with the ID: CHROM:POS:REF:ALT
@@ -58,7 +58,8 @@ rule GatherSampleQCData:
 		tmp_dir=config["tmp_folder"],
 		path_output="data/hail_gather_data"
 	shell:
-		"""
+		"""
+
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
@@ -113,7 +114,8 @@ rule DoFirstSampleVariantQC:
 		tmp_dir=config["tmp_folder"],
 		path_output="data/HAIL_GWAS_vcf"
 	shell:
-		"""
+		"""
+
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
@@ -268,13 +270,13 @@ rule merge_data_w_1000G_run_PCA:
 rule ApplyRelatednessFilter:
 	input:
 		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
-		populations="data/PCA/populations.txt",
+		populations="resources/populations.txt",
 		pheno_file="data/hail_gather_data/for_sample_QC.tsv"
 	output:		
 		PLINK_fam="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz.fam",
 		bed="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz.bed",
 		bim="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz.bim"
-	resources: cpus=12, mem_mb=90000, time_job=10080, additional=" -w b310eth0 --gres localtmp:400G --ntasks=1 "
+	resources: cpus=4, mem_mb=32000, time_job=2880, additional=" --gres localtmp:300G --ntasks=1 -x " + config["master_nodes_excluded"]
 	params:
 		partition='long',
 		out_dir="data/pop_vcf/",
@@ -282,15 +284,18 @@ rule ApplyRelatednessFilter:
 		pop_vcf_rel="data/pop_vcf/{population}_vcf_rel.vcf.bgz",
 		pop_vcf_not_rel="data/pop_vcf/{population}_vcf_not_rel.vcf.bgz",
 	shell:
-		"""		
+		"""		
+
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
 		hail_python_script="scripts/relatedness_filter.py $(pwd)/{input.vcf_for_GWAS} $(pwd)/{params.tmp_dir} $(pwd)/{input.populations} $(pwd)/{input.pheno_file} $(pwd)/{params.pop_vcf_rel} $(pwd)/{params.pop_vcf_not_rel} $(pwd)/{params.out_dir} {wildcards.population}"
 		
 		if [ {config[cluster]} = "yes" ]; then
+		queue="long"
+		hours_to_run=48
 		worker_nodes_excluded={config[worker_nodes_excluded]}
-		num_workers=5
+		num_workers=6
 		source scripts/spark_submit_command.sh
 		$spark_submit_command $hail_python_script
 		
@@ -537,7 +542,8 @@ rule Extract_PRS_variants:
 		out_dir="data/PRS/",
 		tmp_dir=config["tmp_folder"] +"PRS/",
 	shell:
-		"""
+		"""
+
 		mkdir -p {params.out_dir}
 		mkdir -p {params.tmp_dir}
 		
@@ -557,35 +563,20 @@ rule Extract_PRS_variants:
 
 rule Extract_Rohs:
 	input:
-		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
-		vcf_no_QC="data/normalized/df3_norm.vcf.gz"
-	output:		
-		ROH_file="data/ROH/test_roh.tsv.gz",
-		outfile2="data/ROH/another_file.txt" # you can add many more files like this
-	resources: cpus=12, mem_mb=48000, time_job=720, additional=" -w g101eth0 --gres localtmp:200G --ntasks=1 "
+		vcf_for_Plink="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
+	output:
+		bed_file="data/ROH/bedForROHAnalysis.bed",
+		ROH_file=multiext("data/ROH/bedForROHAnalysis_ROH", ".hom", ".hom.indiv", ".hom.summary", ".log")
+	resources: cpus=12, mem_mb=48000, time_job=720, additional=" --gres localtmp:200G --ntasks=1 -x " + config["master_nodes_excluded"]
 	params:
 		partition='batch',
 		out_dir="data/ROH/",
-
-		tmp_dir=config["tmp_folder"] +"PRS/",
+		bed_out="data/ROH/bedForROHAnalysis",
+		ROH_out="data/ROH/bedForROHAnalysis_ROH"
 	shell:
 		"""
 		mkdir -p {params.out_dir}
-		#mkdir -p {params.tmp_dir}
 		
-		# local SSD Scratch would be available in: $SCRATCH_DIR
-		
-		# the code here could e.g. look like this:
-		bcftools roh {input.vcf_for_GWAS} --AF-tag AF -G30 --threads 12 | \
-		grep "RG" | grep 'chr[1-22]' | gzip > {output.ROH_file}
-		
-		# this would translate to
-		bcftools roh data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz --AF-tag AF -G30 --threads 12 | \
-		grep "RG" | grep 'chr[1-22]' | gzip > data/ROH/test_roh.tsv.gz
-				
-		# the second filename that is defined as output could be accessed like this:
-		touch {output.outfile2}
-		
-		# you could also use the vcf that did not underwent QC, this could be accessed by {input.vcf_no_QC}
-		# Have fun! You can also add more rules.
+		plink --vcf {input.vcf_for_Plink} --out {params.bed_out} --make-bed
+		plink --bfile {params.bed_out} --out {params.ROH_out} --homozyg
 		"""

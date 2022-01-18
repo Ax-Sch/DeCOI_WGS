@@ -10,6 +10,11 @@ export PYTHONPATH="/home/aschmidt/scratch/conda/lib/python3.9/site-packages"
 HAIL_HOME=$(pip3 show hail | grep Location | awk -F' ' '{print $2 "/hail"}')
 export SPARK_CLASSPATH=$HAIL_HOME"/backend/hail-all-spark.jar"		
 
+# If variables are not set, assign default values
+queue=${queue:-batch}
+hours_to_run=${hours_to_run:-12}
+num_workers=${num_workers:-5}
+
 echo "Env variables set."
 echo "Start spark master in this job"
 
@@ -19,12 +24,12 @@ echo "Add addtitional workers, save job-ids and add a bash trap to cancel them, 
 
 for i in $(seq 1 $num_workers)
 do
-   slurm_id="$slurm_id "$(sbatch --time=12:00:00 -J spark_worker --ntasks=1 --partition=batch \
-   --mem=48G --cpus-per-task=12 \
+   slurm_id="$slurm_id "$(sbatch --time=${hours_to_run}:00:00 -J spark_worker --ntasks=1 --partition="$queue" \
+   --mem=24G --cpus-per-task=4 \
    --chdir=$(pwd) \
-   --gres localtmp:280G \
+   --gres localtmp:140G \
    -x $worker_nodes_excluded \
-   --wrap "source $(pwd)/scripts/LOCAL_DIR.sh; $spark_worker_path spark://${SLURMD_NODENAME}.cluster.imbie:7077; sleep 12h" | awk '{print $NF}')
+   --wrap "source $(pwd)/scripts/LOCAL_DIR.sh; $spark_worker_path spark://${SLURMD_NODENAME}.cluster.imbie:7077; sleep ${hours_to_run}h" | awk '{print $NF}')
 done
 
 echo "started workers as jobs:"

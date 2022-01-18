@@ -35,30 +35,35 @@ rf_classifier = randomForest(Continental ~ .,
 
 #predict population in your cohort
 dataPred<-dataRF[which(is.na(dataRF$Continental)),]
+dataRF<-dataRF[which(!is.na(dataRF$Continental)),]
 dataPred$Prediction<-rep(NA, nrow(dataPred))
 dataPred$Prediction<-predict(rf_classifier,dataPred[,c("PC1","PC2","PC3","PC4","PC5","PC6")])
 
 outliers<-c()
 # manuell outlier entfernt:
-outliers <- c("FO13863x01_02","FO14026x01_02","DE17BOSUKDD100080","DE39BOSUKDD100072","DE93BOSUKDD100070","DE06BOSUKDD100084","FO14016x01_02","DE38BOSUKED100009","DE76BOSUKDD100085","DE66BOSUKDD100071","DE88BOSUKDD100063","FO14344x02_02","DE37BOSUKDD100011","FO14432x01_02")
+dataPred
 
-dataPred <- dataPred %>% mutate(Prediction=as.factor(ifelse(Individual.ID %in% outliers, "UNK", as.character(Prediction))))
 
-ggplotly(ggplot()+
-           geom_point(data=dataRF, aes(x=PC1,y=PC2,color=Continental), alpha=0.1)+
-           geom_point(data=dataPred, aes(x=PC1,y=PC2,color=Prediction, text=Individual.ID) ))
+#outliers <- c("FO13863x01_02","FO14026x01_02","DE17BOSUKDD100080","DE39BOSUKDD100072","DE93BOSUKDD100070","DE06BOSUKDD100084","FO14016x01_02","DE38BOSUKED100009","DE76BOSUKDD100085","DE66BOSUKDD100071","DE88BOSUKDD100063","FO14344x02_02","DE37BOSUKDD100011","FO14432x01_02")
 
-ggplotly(ggplot()+
-           geom_point(data=dataRF, aes(x=PC3,y=PC4,color=Continental), alpha=0.1)+
-           geom_point(data=dataPred, aes(x=PC3,y=PC4,color=Prediction, text=Individual.ID) ))
+dataPred <- dataPred %>% 
+  mutate(Prediction=as.factor(ifelse(Prediction=="EUR" & (PC1>-0.0067 | PC2<1.5e-2 | PC3<2e-3), "UNK", as.character(Prediction))))
 
 ggplotly(ggplot()+
-           geom_point(data=dataRF, aes(x=PC5,y=PC6,color=Continental), alpha=0.1)+
-           geom_point(data=dataPred, aes(x=PC5,y=PC6,color=Prediction, text=Individual.ID) ))
+          geom_point(data=dataRF, aes(x=PC1,y=PC2,shape=Continental), alpha=0.5,size=3)+ 
+          geom_point(data=dataPred, aes(x=PC1,y=PC2,color=Prediction, text=Individual.ID),shape=1, alpha=0.8,size=2 ) )
 
 ggplotly(ggplot()+
-           geom_point(data=dataRF, aes(x=PC7,y=PC8,color=Continental), alpha=0.1)+
-           geom_point(data=dataPred, aes(x=PC7,y=PC8,color=Prediction, text=Individual.ID) ))
+           geom_point(data=dataRF, aes(x=PC3,y=PC4,shape=Continental), alpha=0.5,size=3)+ 
+           geom_point(data=dataPred, aes(x=PC3,y=PC4,color=Prediction, text=Individual.ID),shape=1, alpha=0.8,size=2 ) )
+
+ggplotly(ggplot()+
+           geom_point(data=dataRF, aes(x=PC5,y=PC6,shape=Continental), alpha=0.5,size=3)+ 
+           geom_point(data=dataPred, aes(x=PC5,y=PC6,color=Prediction, text=Individual.ID),shape=1, alpha=0.8,size=2 ) )
+
+ggplotly(ggplot()+
+           geom_point(data=dataRF, aes(x=PC7,y=PC8,shape=Continental), alpha=0.5,size=3)+ 
+           geom_point(data=dataPred, aes(x=PC7,y=PC8,color=Prediction, text=Individual.ID),shape=1, alpha=0.8,size=2 ) )
 
 # lastly write IDs per population in files to be used for further analyses
 write_tsv(dataPred %>% select(Individual.ID, Prediction),file="populations.txt")
