@@ -7,17 +7,15 @@ import hail as hl
 input_vcf=sys.argv[1] # input[0]
 tmp_dir=sys.argv[2] # params["tmp_dir"]
 out_tsv=sys.argv[3] #output[0]
-working_dir=sys.argv[4]
-print("working directory: " + working_dir)
-os.chdir(working_dir)
+out_mt=sys.argv[4]
 
 
 # initialize hail
 hl.init(tmp_dir=tmp_dir)
 hl._set_flags(no_whole_stage_codegen='1')
-hl.import_vcf(input_vcf, min_partitions=4, reference_genome='GRCh38', force_bgz=True, array_elements_required=False).write(tmp_dir+"hail_gather_data_IN", overwrite=True )
+hl.import_vcf(input_vcf, min_partitions=4, reference_genome='GRCh38', force_bgz=True, array_elements_required=False).write(out_mt, overwrite=True )
 metaData = hl.get_vcf_metadata(input_vcf)
-mtAll = hl.read_matrix_table(tmp_dir+"hail_gather_data_IN")
+mtAll = hl.read_matrix_table(out_mt)
 mtAll=mtAll.drop("PL")
 mtAll=hl.sample_qc(mtAll)
 mtAll=hl.variant_qc(mtAll)

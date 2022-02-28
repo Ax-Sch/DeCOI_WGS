@@ -5,11 +5,10 @@ os.environ["LC_ALL"] = "en_US.UTF-8"
 import hail as hl
 
 # give the following as arguments: input[0] params["tmp_dir"] output[0]
-input_vcf=sys.argv[1] # input[0]
-tmp_dir=sys.argv[2] # params["tmp_dir"]
-in_table=sys.argv[3] # input[1]
-in_hail_dir=sys.argv[4] # input[2]
-out_mt=sys.argv[5] # output[0]
+tmp_dir=sys.argv[1] # params["tmp_dir"]
+in_table=sys.argv[2] # input[1]
+in_hail_dir=sys.argv[3] # input[2]
+out_mt=sys.argv[4] # output[0]
 
 out_dir_list=out_mt.split("/")[0:-1]
 out_path="/".join(out_dir_list)
@@ -23,9 +22,8 @@ sampleQC = hl.import_table(in_table,
       impute=True, 
       key='s') # impute=True >> type imputation
 
-metaData = hl.get_vcf_metadata(input_vcf)
 mtAll = hl.read_matrix_table(in_hail_dir)
-#mtAll = mtAll.drop("PL")
+mtAll = mtAll.drop("PL")
 
 consecutive_sam_var_count=[]
 consecutive_sam_var_count.append("var/samples before filtering: " + str(mtAll.count()))
@@ -75,18 +73,5 @@ with open(out_path + '/consecutive_sample_count.tsv', 'w', newline='') as f_outp
 	tsv_output = csv.writer(f_output, delimiter='\n')
 	tsv_output.writerow(consecutive_sam_var_count)
 
-
-
-
-
-# 98 % Variant CR, 0.1% AF
-mtAll = mtAll.filter_rows((mtAll.variant_qc.AF[1] <= 0.999) & (mtAll.variant_qc.AF[1] >= 0.001))
-mtAll = mtAll.filter_rows(mtAll.variant_qc.call_rate >= 0.98)
-
-mtAll.write(tmp_dir+"hail_generate_plink_tmp2", overwrite=True)
-mtAll = hl.read_matrix_table(tmp_dir+"hail_generate_plink_tmp2")
-consecutive_sam_var_count.append("var/samples after 98 % Variant CR, 0.1% AF: " + str(mtAll.count()))
-
-hl.export_vcf(mtAll, out_vcf, metadata=metaData, tabix=True)
 
 

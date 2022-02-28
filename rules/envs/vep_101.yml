@@ -1,0 +1,7 @@
+name: vep_101
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - ensembl-vep=101

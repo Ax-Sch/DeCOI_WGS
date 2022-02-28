@@ -88,13 +88,13 @@ quants <- c(0.7,0.5,0.456,0.1,0.01, 0.001)
 
 
 for( pcol in pcols) {
-  #data[[pcol]]<-10^(-data[[pcol]])
+  data[[pcol]]<- 10^(-data[[pcol]])
   subdata <- data[ !is.na(data[[pcol]]) & is.numeric( data[[pcol]]  ) ]
+  
   lambda  <- round(  quantile(  (qchisq(1-subdata[[pcol]], 1) ), probs=quants ) / qchisq(quants,1), 3)
   png( paste(output_prefix,"_", pcol ,"_qqplot.png", sep="" ))
   qq(subdata[[pcol]], main=paste("\nlambda ", quants, ": ", lambda, sep="" ) )
   dev.off()
-  
   sink( paste(output_prefix,"_",  pcol ,"_qquantiles.txt", sep="" ) )
   cat( paste( quants, ":", lambda, sep=""))
   sink()
@@ -106,9 +106,11 @@ for( pcol in pcols) {
   print( summary(subdata[[pcol]] ))
   png( paste(output_prefix,"_",pcol,"_manhattan.png", sep=""), width=1000, height=400)
   logs <- -log10(subdata[[pcol]])
-  manhattan( subdata , chr=chr_col, bp=bp_col, p=pcol,snp="Name", ylim=c( 2,max(logs)+1)  )
+  
+  manhattan( subdata , chr=chr_col, bp=bp_col, p=pcol,snp="ID", ylim=c( 2,max(logs)+1)  )
   dev.off()
   
+  print("!!!!!!!!!!!!!!!!!!!!!!!")
   
   print("plotting log-log manhattan")
   loglog_p <- opt$options$loglog_pval
@@ -117,7 +119,7 @@ for( pcol in pcols) {
   tick_pos <- round(seq(1, max(logs), length.out=round(max(logs))))
   tick_lab <- sapply(tick_pos, function(pos) { round(ifelse(pos < loglog_p, pos, loglog_p^(pos/loglog_p))) })
   png( paste(output_prefix,"_",pcol,"_manhattan_loglog.png", sep=""), width=1000, height=400)
-  manhattan( subdata, chr=chr_col, bp=bp_col, p="p_scaled", snp="Name", ylim=c( 2,max(logs)+1), yaxt="n")
+  manhattan( subdata, chr=chr_col, bp=bp_col, p="p_scaled", snp="ID", ylim=c( 2,max(logs)+1), yaxt="n")
   axis(2, at = tick_pos, labels=tick_lab, las=2)
   dev.off()
 }

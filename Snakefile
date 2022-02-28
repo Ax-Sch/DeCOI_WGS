@@ -4,6 +4,9 @@
 
 configfile: "config/config_xcat_test.yaml"
 
+include: "rules/rare_variant_annotation.smk"
+
+
 rule all:
 	input:
 		"data/hail_gather_data/for_sample_QC.tsv",
@@ -17,10 +20,16 @@ rule all:
 		expand("data/PCAcovar/{phenotypes}_{population}_PCA.eigenvec", population=config["populations"], phenotypes=config["phenotypes"]),
 		expand("data/regenie_pheno/cov_{phenotypes}_{population}", population=config["populations"], phenotypes=config["phenotypes"]),
 		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie", population=config["populations"], phenotypes=config["phenotypes"]),
-		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_Pval_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
+		expand("data/regenie/GWAS_{population}_{phenotypes}.regenie_LOG10P_manhattan.png", population=config["populations"], phenotypes=config["phenotypes"]),
 		"data/PRS/variants_for_prs.vcf.bgz",
 		"data/PCA/populations.txt",
-		multiext("data/ROH/bedForROHAnalysis_ROH", ".hom", ".hom.indiv", ".hom.summary", ".log")
+		multiext("data/ROH/bedForROHAnalysis_ROH", ".hom", ".hom.indiv", ".hom.summary", ".log"),
+		"data/plotPhenoInfo/AgePlot.pdf",
+		"data/ROH/test_roh.tsv.gz",
+		"data/rare_variant_vcf/rare_variant_vcf.vcf.bgz",
+		directory("data/hail_gather_data/hail_gather_data_IN"),
+		"data/rare_chrom_annotated/variants_chr21.vcf.gz"
+		
 
 		
 # normalize the vcf file and annotate it with the ID: CHROM:POS:REF:ALT
@@ -40,7 +49,7 @@ rule normalize_vcf_annotate_bcftools:
 		#gzip -d GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
 		bcftools filter -r chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX \
 		  {input.bcf} -Ou | \
-		  bcftools norm -m -any --check-ref w -f {input.fasta} -Ou | \
+		  bcftools norm --check-ref w -f {input.fasta} -Ou | \
 		  bcftools annotate --set-id '%CHROM:%POS:%REF:%FIRST_ALT' -Oz > {output.vcf_gz}
 		tabix -p vcf {output.vcf_gz}
 		"""
@@ -51,7 +60,7 @@ rule GatherSampleQCData:
 		"data/normalized/df3_norm.vcf.gz"
 	output:
 		sample_qc_file="data/hail_gather_data/sampleqc.tsv",
-		out_dir=directory(config["tmp_folder"] + "hail_gather_data_IN")
+		hail_MT=directory("data/hail_gather_data/hail_gather_data_IN")
 	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
 	params:
 		partition='long',
@@ -60,10 +69,10 @@ rule GatherSampleQCData:
 	shell:
 		"""
 
-		mkdir -p {params.out_dir}
+		mkdir -p {params.path_output}
 		mkdir -p {params.tmp_dir}
 		
-		hail_python_script="scripts/QC_HAIL_gather_data.py $(pwd)/{input} $(pwd)/{params.tmp_dir} $(pwd)/{output.sample_qc_file} $(pwd)"
+		hail_python_script="scripts/QC_HAIL_gather_data.py {input} {params.tmp_dir} {output.sample_qc_file} {output.hail_MT}"
 		
 		if [ {config[cluster]} = "yes" ]; then
 		worker_nodes_excluded={config[worker_nodes_excluded]}
@@ -103,9 +112,37 @@ rule ReformatPlotSampleQC:
 # do sample QC based on the list generated from above, do variant QC, filter for variants >0.1% AF (=AC>2)
 rule DoFirstSampleVariantQC:
 	input:
-		vcf="data/normalized/df3_norm.vcf.gz",
 		table="data/hail_gather_data/for_sample_QC.tsv",
-		hail_dir=directory(config["tmp_folder"] + "hail_gather_data_IN")
+		hail_MT=directory("data/hail_gather_data/hail_gather_data_IN")
+	output:
+		QCed_MT=directory("data/first_QC/first_QCed_MT")
+	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
+	params:
+		partition='long',
+		tmp_dir=config["tmp_folder"],
+		path_output="data/first_QC"
+	shell:
+		"""
+		mkdir -p {params.path_output}
+		mkdir -p {params.tmp_dir}
+		
+		hail_python_script="scripts/DoFirstSampleVariantQC.py {params.tmp_dir} {input.table} {input.hail_MT} {output}"
+		
+		if [ {config[cluster]} = "yes" ]; then
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=5
+		source scripts/spark_submit_command.sh
+		$spark_submit_command $hail_python_script
+		
+		else
+		python $hail_python_script
+		fi
+		"""
+
+rule get_GWAS_vcf:
+	input:
+		QCed_MT=directory("data/first_QC/first_QCed_MT"),
+		input_vcf="data/normalized/df3_norm.vcf.gz"
 	output:
 		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz"
 	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
@@ -115,11 +152,42 @@ rule DoFirstSampleVariantQC:
 		path_output="data/HAIL_GWAS_vcf"
 	shell:
 		"""
-
-		mkdir -p {params.out_dir}
+		mkdir -p {params.path_output}
 		mkdir -p {params.tmp_dir}
 		
-		hail_python_script="scripts/QC_HAIL_generate_plink_files_forGWAS.py $(pwd)/{input.vcf} $(pwd)/{params.tmp_dir} $(pwd)/{input.table} $(pwd)/{input.hail_dir} $(pwd)/{output}"
+		hail_python_script="scripts/MakeGwasVCF.py {params.tmp_dir} {input.QCed_MT} {input.input_vcf} {output}"
+		
+		if [ {config[cluster]} = "yes" ]; then
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=5
+		source scripts/spark_submit_command.sh
+		$spark_submit_command $hail_python_script
+		
+		else
+		python $hail_python_script
+		fi
+		"""
+
+
+
+rule get_rare_variant_VCF:
+	input:
+		QCed_MT=directory("data/first_QC/first_QCed_MT"),
+		input_vcf="data/normalized/df3_norm.vcf.gz",
+		input_UCSC_bed="data/bedfilesForPrefilter/ExonsClinVarSpliceAI.bed"
+	output:
+		vcf_for_GWAS="data/rare_variant_vcf/rare_variant_vcf.vcf.bgz"
+	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
+	params:
+		partition='long',
+		tmp_dir=config["tmp_folder"],
+		path_output="data/rare_variant_vcf"
+	shell:
+		"""
+		mkdir -p {params.path_output}
+		mkdir -p {params.tmp_dir}
+		
+		hail_python_script="scripts/makeRareVariantVCF.py {params.tmp_dir} {input.QCed_MT} {input.input_vcf} {input.input_UCSC_bed} {output}"
 		
 		if [ {config[cluster]} = "yes" ]; then
 		worker_nodes_excluded={config[worker_nodes_excluded]}
@@ -181,8 +249,8 @@ rule prepare_1000G_for_ancestry_PCA:
 		variant_list="data/1000G/1000G_chr{contig}.vars",
 		bed2="data/1000G/1000G_chr{contig}_pruned.bed"
 	resources: cpus=1, mem_mb=18000, time_job=720
-	conda:
-		"envs/bcftools_plink_R.yaml"
+#	conda:
+#		"envs/bcftools_plink_R.yaml"
 	params:
 		partition='batch',
 		bed1="data/1000G/1000G_chr{contig}",
@@ -190,7 +258,7 @@ rule prepare_1000G_for_ancestry_PCA:
 	shell:
 		"""
 		if bcftools view -q 0.05:minor {input.vcf} | \
-		bcftools norm -m-any --check-ref w -f {input.fasta} | \
+		bcftools norm -m-any --check-ref w -f "{input.fasta}" | \
 		bcftools annotate -x ID -I +'%CHROM:%POS:%REF:%ALT' | \
 		bcftools norm -Ob --rm-dup both \
 		> {output.vcf} ; then
@@ -232,8 +300,8 @@ rule merge_data_w_1000G_run_PCA:
 	resources: cpus=1, mem_mb=18000, time_job=720
 	params:
 		partition='batch',
-	conda:
-		"envs/bcftools_plink_R.yaml"
+#	conda:
+#		"envs/bcftools_plink_R.yaml"
 	shell:
 		"""
 		echo {input._1000G_data} | tr " " "\\n" | sed 's/.bed//g' > {output.merge_list}
@@ -472,11 +540,14 @@ rule Do_GWAS_with_regenie:
 		--bed {input.bed} \
 		--bim {input.bim} \
 		--fam {input.fam} \
-		 --hwe 1E-15 midp \
-		 --maf 0.01 \
-		 --geno 0.1 \
-		 --indep-pairwise 50 5 0.05 \
-		 --out {params.pruned_plink}
+		--maf 0.01 \
+		--chr 1-22 \
+		--geno 0.01 \
+		--snps-only just-acgt \
+		--hwe 1e-10 \
+		--exclude range resources/longrange_LD_regions_hg38_GRCh38.txt \
+		--indep-pairwise 50kb 5 0.05 \
+		--out {params.pruned_plink}
 		
 		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
 		
@@ -486,31 +557,34 @@ rule Do_GWAS_with_regenie:
 		  --covarFile {input.pathCov} \
 		  --phenoFile {input.pathPheno} \
 		  --bt \
-		  --lowmem \
-		  --lowmem-prefix {params.tmp_dir} \
+		  --loocv \
 		  --extract {params.pruned_plink}.prune.in \
 		  --bsize 1000 \
 		  --out {params.regenie_step1}
+		  #--lowmem \
+		  #--lowmem-prefix {params.tmp_dir} \
 		
 		#step 2
 
 		tools/regenie_v2.2.4.gz_x86_64_Linux_mkl \
 		  --step 2 \
-		  --minMAC 6 \
+		  --minMAC 16 \
 		  --covarFile {input.pathCov} \
 		  --phenoFile {input.pathPheno} \
 		  --bed ${{infile::-4}} \
 		  --bt \
-		  --htp DeCOI \
-		  --firth --approx \
-		  --firth-se \
-		  --maxstep-null 5 \
-		  --maxiter-null 10000 \
+		  --spa \
+		  --write-samples \
 		  --pred {params.regenie_step1}_pred.list \
-		  --bsize 200 \
+		  --bsize 1000 \
 		  --out {params.regenie_step2}
+		  #--htp DeCOI \
+		  #--firth --approx \
+		  #--firth-se \
+		  #--maxstep-null 5 \
+		  #--maxiter-null 10000 \
 		  
-		  rm {params.pruned_plink}* {params.regenie_step1}*
+		  #rm {params.pruned_plink}* {params.regenie_step1}*
 		  """
 		  
 
@@ -518,14 +592,14 @@ rule generate_qq_plots:
 	input:
 		path_reg="data/regenie/GWAS_{population}_{pheno}.regenie"
 	output:
-		"data/regenie/GWAS_{population}_{pheno}.regenie_Pval_manhattan.png" #GWAS_EUR_A2.regenie_plot_Pval_manhattan.png
+		"data/regenie/GWAS_{population}_{pheno}.regenie_LOG10P_manhattan.png" #GWAS_EUR_A2.regenie_plot_Pval_manhattan.png
 	resources: cpus=1, mem_mb=3000, time_job=720
 	params:
 		partition='batch',
 		output_string="data/regenie/GWAS_{population}_{pheno}.regenie"
 	shell:
 		"""
-		Rscript scripts/qqplot.R -f {input} -o {params.output_string} -c Chr -p Pval -b Pos
+		Rscript scripts/qqplot.R -f {input} -o {params.output_string} -c CHROM -p LOG10P -b GENPOS
 		"""
 
 
@@ -561,7 +635,7 @@ rule Extract_PRS_variants:
 		"""
 
 
-rule Extract_Rohs:
+rule Extract_Rohs_plink:
 	input:
 		vcf_for_Plink="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
 	output:
@@ -580,3 +654,36 @@ rule Extract_Rohs:
 		plink --vcf {input.vcf_for_Plink} --out {params.bed_out} --make-bed
 		plink --bfile {params.bed_out} --out {params.ROH_out} --homozyg
 		"""
+
+rule Extract_Rohs_bcftools:
+	input:
+		vcf_for_GWAS="data/HAIL_GWAS_vcf/HAIL_GWAS_vcf.vcf.bgz",
+	output:		
+		ROH_file="data/ROH/test_roh.tsv.gz",
+	resources: cpus=6, mem_mb=24000, time_job=720, additional=" "
+	params:
+		partition='batch',
+		out_dir="data/ROH/",
+	shell:
+		"""
+		mkdir -p {params.out_dir}
+
+
+		# the code here could e.g. look like this:
+		bcftools roh {input.vcf_for_GWAS} --AF-tag AF -G30 --threads 6 | \
+		 gzip > {output.ROH_file}
+		"""
+
+rule CompilePhenoInfo:
+	input:
+		xl_file="config/post_df3_HGI_sample_QC_summary.xlsx",
+		qc_file="data/hail_gather_data/for_sample_QC.tsv"
+	output:
+		AgePlot="data/plotPhenoInfo/AgePlot.pdf",
+
+	resources: cpus=1, mem_mb=6000, time_job=720, additional=" --ntasks=1 "
+	params:
+		partition='batch',
+		out_dir="data/plotPhenoInfo/",
+	shell:
+		"Rscript scripts/compile_phenotype_plots.R {input} {params.out_dir}"

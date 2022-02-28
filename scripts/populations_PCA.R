@@ -39,19 +39,30 @@ dataRF<-dataRF[which(!is.na(dataRF$Continental)),]
 dataPred$Prediction<-rep(NA, nrow(dataPred))
 dataPred$Prediction<-predict(rf_classifier,dataPred[,c("PC1","PC2","PC3","PC4","PC5","PC6")])
 
-outliers<-c()
+#outliers<-c()
 # manuell outlier entfernt:
-dataPred
+#dataPred
 
 
 #outliers <- c("FO13863x01_02","FO14026x01_02","DE17BOSUKDD100080","DE39BOSUKDD100072","DE93BOSUKDD100070","DE06BOSUKDD100084","FO14016x01_02","DE38BOSUKED100009","DE76BOSUKDD100085","DE66BOSUKDD100071","DE88BOSUKDD100063","FO14344x02_02","DE37BOSUKDD100011","FO14432x01_02")
 
-dataPred <- dataPred %>% 
-  mutate(Prediction=as.factor(ifelse(Prediction=="EUR" & (PC1>-0.0067 | PC2<1.5e-2 | PC3<2e-3), "UNK", as.character(Prediction))))
+#dataPred <- dataPred %>% 
+#  mutate(Prediction=as.factor(ifelse(Prediction=="EUR" & (PC1>-0.0067 | PC2<1.5e-2 | PC3<2e-3), "UNK", as.character(Prediction))))
 
-ggplotly(ggplot()+
-          geom_point(data=dataRF, aes(x=PC1,y=PC2,shape=Continental), alpha=0.5,size=3)+ 
-          geom_point(data=dataPred, aes(x=PC1,y=PC2,color=Prediction, text=Individual.ID),shape=1, alpha=0.8,size=2 ) )
+
+PC1_2_plot<-ggplot()+
+  geom_point(data=dataRF, aes(x=PC1,y=PC2,shape=Continental), alpha=0.5,size=3)+ 
+  geom_point(data=dataPred, aes(x=PC1,y=PC2,color=Prediction, text=Individual.ID),shape=1, alpha=0.8,size=3 )+
+  theme_bw()+
+  theme(axis.text.x = element_text(size=10),
+        axis.text.y = element_text(size=10))
+
+ggsave(filename="PC1_2_plot.pdf",
+       plot=PC1_2_plot,
+       width=4,
+       height=3.5)
+ggplotly(PC1_2_plot)
+  
 
 ggplotly(ggplot()+
            geom_point(data=dataRF, aes(x=PC3,y=PC4,shape=Continental), alpha=0.5,size=3)+ 

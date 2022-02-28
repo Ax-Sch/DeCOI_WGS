@@ -52,9 +52,9 @@ for (col in 1:n_cols){
   if (d_types[col] %in% c("integer","numeric")){
     vals_as_vect<-unlist(samplesheet_w_sampleQC[,col])
     median_val=median(vals_as_vect)
-    IQR_val=quantile(vals_as_vect, 3/4) - quantile(vals_as_vect, 1/4)
-    upper=quantile(vals_as_vect, 3/4)+ 1.5 * IQR_val
-    lower=quantile(vals_as_vect, 1/4)- 1.5 * IQR_val
+    IQR_val=quantile(vals_as_vect, 3/4, na.rm=T) - quantile(vals_as_vect, 1/4, na.rm=T)
+    upper=quantile(vals_as_vect, 3/4, na.rm=T)+ 1.5 * IQR_val
+    lower=quantile(vals_as_vect, 1/4, na.rm=T)- 1.5 * IQR_val
     
     p<-ggplot(samplesheet_w_sampleQC)+
       geom_histogram(aes_string(x=colnames(samplesheet_w_sampleQC)[col], fill="filtered_cause"), bins=100)+
@@ -83,9 +83,9 @@ for (col in 1:n_cols){
   if (d_types[col] %in% c("integer","numeric")){
     vals_as_vect<-unlist(samplesheet_w_sampleQC[,col])
     median_val=median(vals_as_vect)
-    IQR_val=quantile(vals_as_vect, 3/4) - quantile(vals_as_vect, 1/4)
-    upper=quantile(vals_as_vect, 3/4)+ 1.5 * IQR_val
-    lower=quantile(vals_as_vect, 1/4)- 1.5 * IQR_val
+    IQR_val=quantile(vals_as_vect, 3/4, na.rm=T) - quantile(vals_as_vect, 1/4, na.rm=T)
+    upper=quantile(vals_as_vect, 3/4, na.rm=T)+ 1.5 * IQR_val
+    lower=quantile(vals_as_vect, 1/4, na.rm=T)- 1.5 * IQR_val
     
     p<-ggplot(samplesheet_w_sampleQC)+
       geom_histogram(aes_string(x=colnames(samplesheet_w_sampleQC)[col], fill="batch"), bins=100)+
@@ -103,3 +103,6 @@ ggsave(filename="heterozygosity.png")
 
 export_file<-samplesheet_w_sampleQC %>% filter(filtered==FALSE, sex_problem==FALSE, is_case!=-9) %>% select(s, filtered, sex_problem, is_case, A2, B2, C2, Age)
 write_tsv(x=export_file, file="for_sample_QC.tsv")
+
+export_file<-samplesheet_w_sampleQC %>% filter(sex_problem==FALSE, is_case!=-9) %>% select(s, filtered, filtered_cause,sample_qc_dp_stats_mean,  sample_qc6_call_rate, sex_problem, is_case, A2, B2, C2, Age)
+write_tsv(x=export_file, file="for_sample_QC_w_cause.tsv")
