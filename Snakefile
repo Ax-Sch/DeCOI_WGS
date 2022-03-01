@@ -28,7 +28,9 @@ rule all:
 		"data/ROH/test_roh.tsv.gz",
 		"data/rare_variant_vcf/rare_variant_vcf.vcf.bgz",
 		directory("data/hail_gather_data/hail_gather_data_IN"),
-		"data/rare_chrom_annotated/variants_chr21.vcf.gz"
+		"data/rare_chrom_annotated/variants_chr18.tsv.gz",
+		"data/rare_chrom_annotated/variants_chr18.frqx.gz",
+		"data/rare_chrom_categorized/chr18.anno"
 		
 
 		
@@ -249,8 +251,8 @@ rule prepare_1000G_for_ancestry_PCA:
 		variant_list="data/1000G/1000G_chr{contig}.vars",
 		bed2="data/1000G/1000G_chr{contig}_pruned.bed"
 	resources: cpus=1, mem_mb=18000, time_job=720
-#	conda:
-#		"envs/bcftools_plink_R.yaml"
+	conda:
+		"spark"
 	params:
 		partition='batch',
 		bed1="data/1000G/1000G_chr{contig}",
@@ -300,8 +302,8 @@ rule merge_data_w_1000G_run_PCA:
 	resources: cpus=1, mem_mb=18000, time_job=720
 	params:
 		partition='batch',
-#	conda:
-#		"envs/bcftools_plink_R.yaml"
+	conda:
+		"spark"
 	shell:
 		"""
 		echo {input._1000G_data} | tr " " "\\n" | sed 's/.bed//g' > {output.merge_list}
@@ -514,27 +516,20 @@ rule generate_covar_files_GWAS:
 		Rscript scripts/generate_covar_file.R {input.xl_file} {input.PCA_cov} {output}
 		"""
  
-rule Do_GWAS_with_regenie:
+
+
+rule get_plink_step1:
 	input:
-		pathCov="data/regenie_pheno/cov_{pheno}_{population}",
-		pathPheno="data/regenie_pheno/pheno_{population}_{pheno}",
 		bed="data/additional_QC/{population}_{pheno}/not_rel_QCed.bed",
 		bim="data/additional_QC/{population}_{pheno}/not_rel_QCed.bim",
 		fam="data/additional_QC/{population}_{pheno}/not_rel_QCed.fam"
 	output:
-		path_reg="data/regenie/GWAS_{population}_{pheno}.regenie"
-	resources: cpus=1, mem_mb=18000, time_job=720
+		pruned="data/regenie/pheno_{population}_{pheno}_pruned_plink.prune.in",
 	params:
-		partition='batch',
-		tmp_dir=config["tmp_folder"] + "/{population}_{pheno}",
-		pruned_plink="data/regenie/pheno_{population}_{pheno}_pruned_plink",
-		regenie_step1="data/regenie/pheno_{population}_{pheno}_step1",
-		regenie_step2="data/regenie/GWAS_{population}"
+		pruned_plink=lambda wildcards, input: input["pruned"][:-9],
+	conda: "spark"
 	shell:
 		"""
-		infile={input.bed}
-		mkdir -p {params.tmp_dir}
-		
 		# LD pruned variants for regenie step 1
 		plink \
 		--bed {input.bed} \
@@ -548,34 +543,73 @@ rule Do_GWAS_with_regenie:
 		--exclude range resources/longrange_LD_regions_hg38_GRCh38.txt \
 		--indep-pairwise 50kb 5 0.05 \
 		--out {params.pruned_plink}
-		
+		"""
+
+
+
+
+rule Do_GWAS_with_regenie:
+	input:
+		pathCov="data/regenie_pheno/cov_{pheno}_{population}",
+		pathPheno="data/regenie_pheno/pheno_{population}_{pheno}",
+		pruned="data/regenie/pheno_{population}_{pheno}_pruned_plink.prune.in",
+		bed="data/additional_QC/{population}_{pheno}/not_rel_QCed.bed",
+		bim="data/additional_QC/{population}_{pheno}/not_rel_QCed.bim",
+		fam="data/additional_QC/{population}_{pheno}/not_rel_QCed.fam"
+	output:
+		step1="data/regenie/pheno_{population}_{pheno}_step1_pred.list"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition='batch',
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		step1=lambda wildcards, output: output["step1"][:-10],
+	shell:
+		"""
+		mkdir -p {params.tmp_dir}
 		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
 		
 		tools/regenie_v2.2.4.gz_x86_64_Linux_mkl \
 		  --step 1 \
-		  --bed ${{infile::-4}} \
+		  --bed {params.plink_file} \
 		  --covarFile {input.pathCov} \
 		  --phenoFile {input.pathPheno} \
 		  --bt \
 		  --loocv \
-		  --extract {params.pruned_plink}.prune.in \
+		  --extract {input.pruned} \
 		  --bsize 1000 \
-		  --out {params.regenie_step1}
-		  #--lowmem \
-		  #--lowmem-prefix {params.tmp_dir} \
-		
-		#step 2
+		  --out {params.step1}
+		 """
+		  
+		 
+rule Do_GWAS_with_regenie:
+	input:
+		pathCov="data/regenie_pheno/cov_{pheno}_{population}",
+		pathPheno="data/regenie_pheno/pheno_{population}_{pheno}",
+		step1="data/regenie/pheno_{population}_{pheno}_step1_pred.list",
+		bed="data/additional_QC/{population}_{pheno}/not_rel_QCed.bed",
+		bim="data/additional_QC/{population}_{pheno}/not_rel_QCed.bim",
+		fam="data/additional_QC/{population}_{pheno}/not_rel_QCed.fam"
+	output:
+		path_reg="data/regenie/GWAS_{population}_{pheno}.regenie"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition='batch',
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		regenie_step2=lambda wildcards, output: output["path_reg"][:-8]
+	shell:
+		"""
+		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
 
 		tools/regenie_v2.2.4.gz_x86_64_Linux_mkl \
 		  --step 2 \
 		  --minMAC 16 \
 		  --covarFile {input.pathCov} \
 		  --phenoFile {input.pathPheno} \
-		  --bed ${{infile::-4}} \
+		  --bed {params.plink_file} \
 		  --bt \
 		  --spa \
 		  --write-samples \
-		  --pred {params.regenie_step1}_pred.list \
+		  --pred {input.step1} \
 		  --bsize 1000 \
 		  --out {params.regenie_step2}
 		  #--htp DeCOI \
@@ -584,9 +618,48 @@ rule Do_GWAS_with_regenie:
 		  #--maxstep-null 5 \
 		  #--maxiter-null 10000 \
 		  
-		  #rm {params.pruned_plink}* {params.regenie_step1}*
 		  """
+
+rule Do_RVAS_with_regenie:
+	input:
+		pathCov="data/regenie_pheno/cov_{pheno}_{population}",
+		pathPheno="data/regenie_pheno/pheno_{population}_{pheno}",
+		step1="data/regenie/pheno_{population}_{pheno}_step1_pred.list",
+		vcf=""
+	output:
+		path_reg="data/regenie/RVAS_{population}_{pheno}.regenie"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition='batch',
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		regenie_step2=lambda wildcards, output: output["path_reg"][:-8]
+	shell:
+		"""
+		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
+
+		tools/regenie_v2.2.4.gz_x86_64_Linux_mkl \
+		  --step 2 \
+		  --minMAC 16 \
+		  --covarFile {input.pathCov} \
+		  --phenoFile {input.pathPheno} \
+		  --bed {params.plink_file} \
+		  --bt \
+		  --spa \
+		  --write-samples \
+		  --pred {input.step1} \
+		  --bsize 1000 \
+		  --out {params.regenie_step2}
+		  #--htp DeCOI \
+		  #--firth --approx \
+		  #--firth-se \
+		  #--maxstep-null 5 \
+		  #--maxiter-null 10000 \
 		  
+		  """
+
+
+
+  
 
 rule generate_qq_plots:
 	input:
