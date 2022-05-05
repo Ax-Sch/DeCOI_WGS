@@ -20,4 +20,8 @@
  spark_worker_path: "/ceph01/scratch/aschmidt/spark/spark-3.1.1-bin-hadoop3.2/sbin/start-worker.sh"
  LD_LIBRARY_PATH: "/home/aschmidt/scratch/conda/lib"
  database_dir: "/media/axel/Seagate Backup Plus Drive/annotation_sources/"
-
+ pheno_excel: "/media/axel/Dateien/Arbeit_Gen/COVID_WGS/Sample_listen_erstellen/post_df3_HGI_sample_QC_summary.xlsx"
+ array_files: "/media/axel/Seagate Backup Plus Drive/bosco_longCOVID/merged_original_data/merged_data.fam"
+ long: "long"
+ medium: "medium"
+ annotations_dir: "/home/aschmidt/Arbeit_Gen/COVID_WGS/COVID_annotation/results/for_RVAS/"

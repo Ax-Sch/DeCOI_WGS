@@ -1,0 +1,15 @@
+name: bcftools_plink_R
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - plink2
+  - plink
+  - bgenix
+  - bcftools==1.10.2
+  - r-randomforest
+  - r-tidyverse
+  - r-data.table
+  - r-plotly
+  - r-readxl

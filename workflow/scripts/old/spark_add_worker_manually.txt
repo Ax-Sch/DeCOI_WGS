@@ -1,0 +1,1 @@
+sbatch --time=96:00:00 -J spark_worker --ntasks=1 --partition=long --mem=48G --cpus-per-task=12 --wrap "source $(pwd)/workflow/scripts/LOCAL_DIR.sh;  /ceph01/scratch/aschmidt/spark/spark-3.1.1-bin-hadoop3.2/sbin/start-worker.sh spark://b206eth0.cluster.imbie:7077; sleep 100h" | awk '{print $NF}'
