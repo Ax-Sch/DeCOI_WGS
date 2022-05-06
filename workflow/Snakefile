@@ -15,7 +15,10 @@ rule all:
 		expand("results/saige/{contig}GWAS_EUR_A2.saige.txt", contig=config["contigs_wo_X"]+[23]),
 		"results/saige/allChrGWAS_EUR_A2.saige.txt.gz",
 		"results/all_vars_for_RVAS/eurs.vcf.bgz",
-		"results/regenie/RVAS_EUR_POP_A2.regenie.gz"
+		"results/regenie/RVAS_EUR_POP_A2_A2.regenie.gz",
+		"results/regenie/RVAS_EUR_POP_B2_B2.regenie.gz",
+		"results/regenie/GWAS_EUR_A2.regenie.gz",
+		"results/regenie/GWAS_EUR_B2.regenie.gz",
 
 
 # START # GENERAL QC ############################################################################################################################################
@@ -612,6 +615,7 @@ rule QC_pre_GWAS:
 		fam="results/common_vars_for_gwas/eurs.fam",
 		bim="results/common_vars_for_gwas/eurs.bim",
 		bed="results/common_vars_for_gwas/eurs.bed",
+		mt=directory("results/common_vars_for_gwas/eurs_mt")
 	resources: cpus=4, mem_mb=10000, time_job=720, additional=" -x " + config["master_nodes_excluded"]
 	params:
 		partition=config["long"],
@@ -1028,7 +1032,10 @@ rule Regenie_step2_RVAS:
 		regenie_set_list=config["annotations_dir"]+"all_contigs_set.list.txt",
 		regenie_mask_def="resources/mask_definition.mask"
 	output:
-		path_reg="results/regenie/RVAS_{population}_POP_{pheno}.regenie.gz"
+		path_reg="results/regenie/RVAS_{population}_POP_{pheno}_{pheno}.regenie.gz",
+		mask_bed="results/regenie/RVAS_{population}_POP_{pheno}_masks.bed",
+		mask_fam="results/regenie/RVAS_{population}_POP_{pheno}_masks.fam",
+		mask_bim="results/regenie/RVAS_{population}_POP_{pheno}_masks.bim",
 	resources: cpus=1, mem_mb=18000, time_job=720
 	conda: "envs/regenie.yaml"
 	params:
@@ -1056,6 +1063,8 @@ rule Regenie_step2_RVAS:
 		  --htp DeCOI \
 		  --ignore-pred \
 		  --out {params.regenie_step2} \
+		  --write-mask \
+		  --af-cc \
 		  --gz
 		  #--pred {input.step1} \
 		  #--firth --approx \
@@ -1072,7 +1081,7 @@ rule Regenie_step2_RVAS:
 
 rule Extract_PRS_variants:
 	input:
-		mt_table="results/normalized/hail_MT",
+		mt_table="results/common_vars_for_gwas/eurs_mt",
 		prs_file="resources/hg38.PRS.tsv"
 	output:		
 		vcf_for_PRS="results/PRS/variants_for_prs.vcf.bgz"
