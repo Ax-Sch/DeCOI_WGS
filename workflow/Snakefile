@@ -794,23 +794,24 @@ rule Regenie_step2_GWAS:
 
 		regenie \
 		  --step 2 \
-		  --minMAC 16 \
+		  --minMAC 10 \
 		  --covarFile {input.pathCov} \
 		  --phenoFile {input.pathPheno} \
 		  --bed {params.plink_file} \
 		  --bt \
 		  --spa \
+		  --htp DeCOI \
+		  --ignore-pred \
 		  --write-samples \
-		  --pred {input.step1} \
 		  --bsize 1000 \
 		  --out {params.regenie_step2} \
 		  --gz
-		  #--htp DeCOI \
+
+		  #--pred {input.step1} \
 		  #--firth --approx \
 		  #--firth-se \
 		  #--maxstep-null 5 \
 		  #--maxiter-null 10000 \
-		  
 		  """
 
 rule plink2_GWAS:
@@ -1029,6 +1030,7 @@ rule Regenie_step2_RVAS:
 	output:
 		path_reg="results/regenie/RVAS_{population}_POP_{pheno}.regenie.gz"
 	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/regenie.yaml"
 	params:
 		partition=config["medium"],
 		plink_file=lambda wildcards, input: input["plink_file"][:-4],
@@ -1037,7 +1039,7 @@ rule Regenie_step2_RVAS:
 		"""
 		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
 
-		tools/regenie_v2.2.4.gz_x86_64_Linux_mkl \
+		regenie \
 		  --step 2 \
 		  --minMAC 1 \
 		  --covarFile {input.pathCov} \
@@ -1048,13 +1050,14 @@ rule Regenie_step2_RVAS:
 		  --set-list {input.regenie_set_list} \
 		  --bed {params.plink_file} \
 		  --bt \
-		  --spa \
+		  --firth-se \
 		  --write-samples \
-		  --pred {input.step1} \
 		  --bsize 1000 \
+		  --htp DeCOI \
+		  --ignore-pred \
 		  --out {params.regenie_step2} \
 		  --gz
-		  #--htp DeCOI \
+		  #--pred {input.step1} \
 		  #--firth --approx \
 		  #--firth-se \
 		  #--maxstep-null 5 \
