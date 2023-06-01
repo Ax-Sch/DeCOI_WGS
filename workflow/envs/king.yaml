@@ -1,0 +1,5 @@
+name: king
+channels:
+  - bioconda
+dependencies:
+  - king

@@ -1,0 +1,55 @@
+---
+ input_vcf: "/home/aschmidt/COVID_WGS/resources/.no_upload/covid.genome.bcf"
+ fasta: "/home/aschmidt/genomic_resources_hg38/fasta/Homo_sapiens_assembly38.fasta"
+ phenotypes:
+  - A1
+  - B1
+ location_1000G: "/home/aschmidt/genomic_resources_hg38/1KG/"
+ populations:
+  - EUR
+ contigs_wo_X:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+ tmp_folder: "tmp/"
+ cluster: "yes"
+ master_nodes_excluded: "node01"
+ worker_nodes_excluded: "node01"
+ PATH: "$(echo \"$PATH\")"
+ PYTHONPATH: "/home/aschmidt/miniconda3/lib/python3.9/site-packages"
+ spark_master_path: "/home/aschmidt/spark-3.1.1-bin-hadoop3.2/sbin/start-master.sh"
+ spark_worker_path: "/home/aschmidt/spark-3.1.1-bin-hadoop3.2/sbin/start-worker.sh"
+ LD_LIBRARY_PATH: "/home/aschmidt/miniconda3/lib"
+ database_dir: "/home/aschmidt/"
+ pheno_excel: "/home/aschmidt/COVID_WGS/resources/.no_upload/post_df3_HGI_sample_QC_summary.xlsx"
+ array_files: "/home/aschmidt/COVID_WGS/resources/.no_upload/NAPKON_array/NAPKON_16_samples_bed.fam"
+ long: "long"
+ medium: "medium"
+ annotations_dir: "/home/aschmidt/COVID_annotation/results/for_RVAS/"
+ masks: 
+  - M0
+  - M1
+  - M3
+  - M4
+ af_cutoffs:
+  - 0.05
+  - 0.001

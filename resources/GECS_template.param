@@ -1,0 +1,7 @@
+BFILE bfile	// plink binary file without extension
+SINGLEMARKER 0	     // perform variable binning approach (VB) instead of single marker analysis (SMA) 
+PERMUTATIONS 999       // number of permutations
+MAFT 0.03		// The corresponding NCT will be calculated and will appear in name of output files
+OR 1
+CORR_P 1
+OUTPUTNAME outx	     // output without extension

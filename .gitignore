@@ -1,0 +1,8 @@
+**/tmp
+**/results
+**/notebooks
+**/old
+.snakemake
+.Rhistory
+.no_upload
+

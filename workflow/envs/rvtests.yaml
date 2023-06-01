@@ -1,0 +1,5 @@
+name: rvtests
+channels:
+  - bioconda
+dependencies:
+  - rvtests=2.0.7

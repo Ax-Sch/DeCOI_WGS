@@ -1,0 +1,5 @@
+name: saige
+channels:
+  - bioconda
+dependencies:
+  - r-saige=0.45

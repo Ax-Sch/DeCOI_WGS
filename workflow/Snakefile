@@ -1,0 +1,1909 @@
+configfile: "config/config.yaml"
+test_mode=["r","set"]
+tests=["max"] #"skato" "sum",
+PRSs=["PRS","regular"]
+sex_params=["male","female","any"]
+inheritance=["rec","add"]
+
+rule test:
+	input:
+		"results/PCA/populations_PCA.html",
+		"results/primaryQC/sampleqc.tsv",
+		"results/primaryQC/plot_sampleQC.html",
+		"results/primaryQC/sexcheck.sexcheck",
+		"results/primaryQC/sexcheck.jpg",
+		"results/primaryQC/missingness.imiss",
+		expand("results/GWAS/EUR_{pheno}.regenie.gz_LOG10P_manhattan.png", pheno=config["phenotypes"]),
+		expand("results/GWAS/EUR_{pheno}_{subpheno}.regenie.gz_LOG10P_manhattan.png", pheno=config["phenotypes"], subpheno=["female","male", "GE60", "LT60","GE60CC", "LT60CC"]),
+		#expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.05_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test="skato", set=test_mode, PRS=PRSs),
+		expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.001_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test="max", set="r", PRS=PRSs),
+		expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.001_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test=["sum","max"], set="set", PRS=PRSs),
+		expand("results/RVAS/TLR7RVAS_EUR_POP_{pheno}_{PRS}/{rec}_{sex}_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"],rec=inheritance, PRS=PRSs, sex=sex_params),
+		expand("results/RVAS/TLR7PlinkFisher/{sex}_{pheno}.model", pheno=config["phenotypes"], sex=sex_params),
+		expand("results/RVAS/TLR7PlinkFisher/{sex}_{pheno}_cases.frqx", pheno=config["phenotypes"], sex=sex_params),
+		#expand("results/RVAS/plink_{set}RVAS/EUR_POP_{pheno}_{AF}_{pheno}.modelQQ.pdf", pheno=config["phenotypes"], AF=config["af_cutoffs"], set=test_mode),
+		"results/kinship/king.kin0",
+		"results/GWAS/EUR:45859597_B1.regenie.gz",
+		#"results/GWAS/EUR:45859597_B1.regenie.gz_LOG10P_manhattan.png",
+		expand("results/GWAS/EUR:45859597_B1_{subpheno}.regenie.gz_LOG10P_manhattan.png", subpheno=["female","male", "GE60", "LT60"]),
+		#"results/PRS/scores.profile",
+		#"results/genomeScan/genomeScanEUR_A1G.fam",
+		#"results/rvtests/results_Fisher/EUR_POP_A1/M3_0.01.CMCFisherExact.assoc",
+		#"results/rvtests/results_SKAT_regional/EUR_POP_A1/M3_0.01.Skat.assoc",
+		"results/array_comparison/array_comp.con",
+
+
+
+# START # GENERAL QC ############################################################################################################################################
+
+# normalize the vcf file and annotate it with the ID: CHROM:POS:REF:ALT
+rule normalize_vcf_annotate_bcftools:
+	input:
+		bcf=config["input_vcf"],
+		fasta=config["fasta"]
+	output:
+		vcf_gz="results/normalized/df3_norm.vcf.gz",
+		vcf_gz_index="results/normalized/df3_norm.vcf.gz.tbi"
+	resources: cpus=1, mem_mb=8000, time_job=10080
+	params:
+		partition=config["long"]
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		#wget -nc ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
+		#gzip -d GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
+		bcftools filter -r chr1,chr2,chr3,chr4,chr5,chr6,chr7,chr8,chr9,chr10,chr11,chr12,chr13,chr14,chr15,chr16,chr17,chr18,chr19,chr20,chr21,chr22,chrX \
+		  {input.bcf} -Ou | \
+		  bcftools norm --check-ref w -f {input.fasta} -Ou | \
+		  bcftools annotate --set-id '%CHROM:%POS:%REF:%FIRST_ALT' -Oz > {output.vcf_gz}
+		tabix -p vcf {output.vcf_gz}
+		"""
+
+
+# Just calculate sample QC-data using hail
+rule ConvertToHail:
+	input:
+		vcf="results/normalized/df3_norm.vcf.gz",
+		individual_list="resources/.no_upload/covid_individuals.txt"
+	output:
+		hail_MT=directory("results/normalized/hail_MT"),
+	resources: cpus=4, mem_mb=10000, time_job=10080, additional=" -x " + config["master_nodes_excluded"]
+	params:
+		partition=config["long"],
+		tmp_dir=config["tmp_folder"],
+	conda: "spark"
+	shell:
+		"""
+		mkdir -p {params.tmp_dir}
+		
+		hail_python_script="workflow/scripts/vcf2hail.py $(pwd)/{input.vcf} \
+		$(pwd)/{output} \
+		$(pwd)/{params.tmp_dir} \
+		$(pwd)/{input.individual_list}"
+		
+		if [ {config[cluster]} = "yes" ]; then
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=60
+		source workflow/scripts/spark_submit_command.sh
+		$spark_submit_command $hail_python_script
+		
+		else
+		python $hail_python_script
+		fi
+		"""
+
+rule primaryQC:
+	input:
+		mt="results/normalized/hail_MT",
+	output:		
+		sample_qc_file="results/primaryQC/sampleqc.tsv",
+		QC_fam="results/var_sets/for_QC/common.fam",
+		QC_bed="results/var_sets/for_QC/common.bed",
+		QC_bim="results/var_sets/for_QC/common.bim",
+	resources: cpus=4, mem_mb=80000, time_job=720, additional=" --ntasks=1 " #-x " + config["master_nodes_excluded"] # --gres localtmp:300G
+	params:
+		partition=config["medium"],
+		tmp_dir=config["tmp_folder"] +"prune_filter/",
+		out_plink=lambda wildcards, output: output["QC_fam"][:-4],
+	conda: "spark"
+	shell:
+		"""	
+		mkdir -p {params.tmp_dir}
+		
+		hail_python_script="workflow/scripts/primaryQC.py \
+		$(pwd)/{input.mt} \
+		$(pwd)/{params.tmp_dir} \
+		$(pwd)/{output.sample_qc_file} \
+		$(pwd)/{params.out_plink}"
+		
+		if [ {config[cluster]} = "yes" ]; then
+		queue="medium"
+		export TMPDIR=$(pwd)/{params.tmp_dir}
+		hours_to_run=12
+		DRIVE_MEM=78
+		SPARK_LOCAL_DIRS=$(pwd)/{params.tmp_dir}
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=60
+		source workflow/scripts/spark_submit_command.sh
+		$spark_submit_command $hail_python_script
+		
+		else
+		python $hail_python_script
+		fi
+		
+		rm -rf {params.tmp_dir}*
+		"""
+
+rule ReformatPlotSampleQC:
+	input:
+		sampleQC="results/primaryQC/sampleqc.tsv",
+		xl_file=config["pheno_excel"]
+	output:
+		"results/primaryQC/plot_sampleQC.html",
+	resources: cpus=1, mem_mb=4000, time_job=720
+	params:
+		partition=config["medium"],
+		path_output="results/primaryQC/"
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		echo $(pwd)
+
+		cp workflow/scripts/plot_sampleQC.R {params.path_output}
+		cp {input.xl_file} {params.path_output}
+		
+		cd {params.path_output}
+		
+		Rscript -e 'library(rmarkdown); rmarkdown::render("plot_sampleQC.R", "html_document")'
+		rm *.R
+		"""
+
+rule MakeVarSets:
+	input:
+		MT="results/normalized/hail_MT",
+		individual_list="resources/.no_upload/Basic_QC_OK.txt",
+		input_vcf="results/normalized/df3_norm.vcf.gz"
+	output:
+		fam="results/var_sets/general.fam",
+		bim="results/var_sets/general.bim",
+		bed="results/var_sets/general.bed",
+		vcf="results/var_sets/general.vcf.bgz",
+		famCommon="results/var_sets/common.fam",
+		bimCommon="results/var_sets/common.bim",
+		bedCommon="results/var_sets/common.bed",
+		call_rate="results/var_sets/general_row_info.tsv.gz",
+	resources: cpus=4, mem_mb=160000, time_job=1400, additional=" -x " + config["master_nodes_excluded"]
+	params:
+		partition=config["medium"],
+		tmp_dir=config["tmp_folder"],
+		out_trunk=lambda wildcards, output: output["fam"][:-4],
+		out_Commontrunk=lambda wildcards, output: output["famCommon"][:-4],
+	conda: "spark"
+	shell:
+		"""
+		mkdir -p {params.tmp_dir}
+		
+		hail_python_script="workflow/scripts/MakeVarSets.py \
+		$(pwd)/{params.tmp_dir} \
+		$(pwd)/{input.MT} \
+		$(pwd)/{input.input_vcf} \
+		$(pwd)/{input.individual_list} \
+		$(pwd)/{params.out_trunk} \
+		$(pwd)/{params.out_Commontrunk}"
+		
+		if [ {config[cluster]} = "yes" ]; then
+		export TMPDIR=$(pwd)/{params.tmp_dir}
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		hours_to_run=12
+		DRIVE_MEM=148
+		num_workers=60
+		source workflow/scripts/spark_submit_command.sh
+		$spark_submit_command $hail_python_script
+		
+		else
+		python $hail_python_script
+		fi
+		"""
+
+
+rule regions_prune:
+	input:
+		in_plink="results/var_sets/for_QC/common.fam",
+		bed="resources/regions_of_high_LD_GRCh38.bed",
+	output:		
+		out_plink="results/var_sets/for_QC/common_pruned.fam",
+		bim="results/var_sets/for_QC/common_pruned.bim",
+		bed="results/var_sets/for_QC/common_pruned.bed",
+	resources: cpus=4, mem_mb=16000, time_job=720, additional=" --ntasks=1 " #-x " + config["master_nodes_excluded"] # --gres localtmp:300G
+	params:
+		partition=config["medium"],
+		in_plink=lambda wildcards, input: input["in_plink"][:-4],
+		tmp_plink=lambda wildcards, output: output["out_plink"][:-4]+"_tmp",
+		out_plink=lambda wildcards, output: output["out_plink"][:-4],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		plink2 \
+		--bfile {params.in_plink} \
+		--maf 0.01 \
+		--exclude bed0 {input.bed} \
+		--make-bed \
+		--out {params.tmp_plink}		
+		
+		plink \
+		--bfile {params.tmp_plink} \
+		--indep-pairwise 1000kb 50 0.2 \
+		--out {params.out_plink}
+		
+		plink \
+		--bfile  {params.in_plink} \
+		--extract {params.out_plink}.prune.in \
+		--split-x hg38 no-fail \
+		--make-bed \
+		--out {params.out_plink}
+		
+		rm {params.tmp_plink}*
+		"""
+
+
+rule impute_sex:
+	input:
+		fam="results/var_sets/for_QC/common_pruned.fam",
+		bim="results/var_sets/for_QC/common_pruned.bim",
+		bed="results/var_sets/for_QC/common_pruned.bed",
+	output:		
+		sex_check="results/primaryQC/sexcheck.sexcheck",
+		hwe_vars="results/primaryQC/sexcheck.bim",
+	resources: cpus=4, mem_mb=16000, time_job=720, additional=" --ntasks=1 " #-x " + config["master_nodes_excluded"] # --gres localtmp:300G
+	params:
+		partition=config["medium"],
+		hwe_vars=lambda wildcards, output: output["hwe_vars"][:-4],
+		out_plink=lambda wildcards, output: output["sex_check"][:-9],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		--filter-females \
+		--hwe 1e-3 midp include-nonctrl \
+		--make-just-bim \
+		--out {params.hwe_vars}
+
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		--extract {output.hwe_vars} \
+		--check-sex 0.5 0.8 \
+		--out {params.out_plink}
+
+		"""
+
+rule plot_imputed_sex:
+	input:
+		"results/primaryQC/sexcheck.sexcheck",
+	output:		
+		"results/primaryQC/sexcheck.jpg"
+	resources: cpus=1, mem_mb=4000, time_job=720, additional=" "
+	params:
+		partition=config["medium"],
+	conda: "envs/bcftools_plink_R.yaml"
+	script: "scripts/plotFcheckSex.R"
+
+
+rule get_missingness:
+	input:
+		fam="results/var_sets/for_QC/common_pruned.fam",
+		bim="results/var_sets/for_QC/common_pruned.bim",
+		bed="results/var_sets/for_QC/common_pruned.bed",
+	output:		
+		mind="results/primaryQC/missingness.imiss"
+	resources: cpus=1, mem_mb=4000, time_job=720, additional=" "
+	params:
+		partition=config["medium"],
+		out_plink=lambda wildcards, output: output["mind"][:-6],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		--chr 1-22 \
+		--missing \
+		--out {params.out_plink}
+		"""
+
+
+
+#### Population PCA W 1000G project
+
+rule download_1000G_sample_info:
+	output:
+		#"GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
+		"results/PCA/20130606_g1k.ped" # contig = chr1, ...
+	resources: cpus=1, mem_mb=3000, time_job=720
+	params:
+		out_folder="results/PCA/",
+		partition=config["medium"]
+	shell:
+		"""
+		mkdir -p {params.out_folder}
+		cd {params.out_folder}
+		wget -nc ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/working/20130606_sample_info/20130606_g1k.ped
+		
+		#reference genome  (GRCh38)
+		#wget -nc ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
+		#gzip -d GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
+		"""
+
+rule download_1000G_genotypes:
+	output:
+		config["location_1000G"]+"ALL.chr{contig}.shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz",
+		config["location_1000G"]+"ALL.chr{contig}.shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz.tbi"#
+	resources: cpus=1, mem_mb=3000, time_job=720
+	params:
+		partition=config["medium"],
+		folder_cont=config["location_1000G"]
+	shell:
+		"""
+		mkdir -p {params.folder_cont}
+		cd {params.folder_cont}
+		prefix="ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000_genomes_project/release/20181203_biallelic_SNV/ALL.chr"
+		suffix=".shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz"
+		wget -nc "$prefix""{wildcards.contig}""$suffix" "$prefix""{wildcards.contig}""$suffix".tbi
+		"""
+
+
+rule prepare_1000G_for_ancestry_PCA:
+	input:
+		vcf=config["location_1000G"]+"ALL.chr{contig}.shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz",
+		fasta=config["fasta"], #/ceph01/projects/bioinformatics_resources/Genomes/Human/GATK/hg38/Homo_sapiens_assembly38.fasta
+		hailbim="results/var_sets/for_QC/common_pruned.bim",
+	output:
+		bcf="results/1000G/1000G_chr{contig}.bcf",
+		bed2="results/1000G/1000G_chr{contig}_pruned.bed"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	params:
+		partition=config["medium"],
+		bed1="results/1000G/1000G_chr{contig}",
+		bed2="results/1000G/1000G_chr{contig}_pruned"
+	shell:
+		"""
+		if bcftools view -q 0.05:minor {input.vcf} | \
+		bcftools norm -m-any --check-ref w -f "{input.fasta}" | \
+		bcftools annotate -x ID -I +'%CHROM:%POS:%REF:%ALT' | \
+		bcftools norm -Ob --rm-dup both \
+		> {output.bcf} ; then
+		echo "no error"
+		fi
+		
+		plink --noweb \
+		--bcf {output.bcf} \
+		--keep-allele-order \
+		--vcf-idspace-to _ \
+		--allow-extra-chr 0 \
+		--split-x b38 no-fail \
+		--make-bed \
+		--out {params.bed1}
+		
+		plink --noweb \
+		--bfile {params.bed1} \
+		--extract {input.hailbim} \
+		--maf 0.10 --indep 50 5 1.5 \
+		--make-bed \
+		--out {params.bed2}
+		"""
+		
+rule merge_data_w_1000G_run_PCA:
+	input:
+		_1000G_data=expand("results/1000G/1000G_chr{contig}_pruned.bed", contig=config["contigs_wo_X"]), #### !!!!! 
+		hailbim="results/var_sets/for_QC/common_pruned.bim",
+		ped_file_1000G="results/PCA/20130606_g1k.ped"
+	output:
+		merge_list="results/1000G/merge_list.txt",
+		bim_pca="results/PCA/MergeFullForPCA.bim",
+		pca="results/PCA/MergeFullForPCA.eigenvec",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"],
+		hailplink=lambda wildcards, input: input["hailbim"][:-4],
+		pca_prefix=lambda wildcards, output: output["bim_pca"][:-4],
+	conda:
+		"spark"
+	shell:
+		"""
+		echo {input._1000G_data} | tr " " "\\n" | sed 's/.bed//g' > {output.merge_list}
+		plink --merge-list {output.merge_list} --out results/1000G/Merged
+		awk '{{ print $2 }}' results/1000G/Merged.bim > results/1000G/MergeVariants.txt
+		
+		plink --bfile {params.hailplink} \
+		 --extract results/1000G/MergeVariants.txt \
+		 --make-bed \
+		 --out results/1000G/hail_for_ancestry
+		 
+		printf "results/1000G/Merged\\nresults/1000G/hail_for_ancestry" > results/1000G/ForMergeFull.list
+		
+		mkdir -p results/PCA
+		plink --merge-list results/1000G/ForMergeFull.list --out results/PCA/MergeFullForPCA
+		 
+		awk '{{ print $1,$2 }}' results/1000G/Merged.fam | awk '$(NF+1) = "1000G"' > results/PCA/clusters.txt
+		awk '{{ print $1,$2 }}' results/1000G/hail_for_ancestry.fam | awk '$(NF+1) = "Cohort"' >> results/PCA/clusters.txt
+		
+		plink --bfile results/PCA/MergeFullForPCA \
+		 --pca-cluster-names 1000G \
+		 --pca 20 \
+		 --out {params.pca_prefix} \
+		 --within results/PCA/clusters.txt
+		"""
+
+
+rule analyse_PCA_results:
+	input:
+		"results/PCA/MergeFullForPCA.eigenvec",
+		"results/PCA/20130606_g1k.ped",
+		"resources/.no_upload/covid_individuals.txt",
+	output:
+		populations="results/PCA/populations.txt",
+		html="results/PCA/populations_PCA.html"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"],
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		cp -f workflow/scripts/populations_PCA.R results/PCA/populations_PCA.R
+		cd results/PCA/
+		Rscript -e 'library(rmarkdown); rmarkdown::render("populations_PCA.R", "html_document")'
+		"""
+
+rule kinship_analysis:
+	input:
+		fam="results/var_sets/for_QC/common_pruned.fam",
+	output:
+		kinship_file1="results/kinship/king.kin0",
+	resources: cpus=4, mem_mb=16000, time_job=720, additional=" --ntasks=1 " #-x " + config["master_nodes_excluded"] # --gres localtmp:300G
+	params:
+		partition=config["medium"],
+		plink_in=lambda wildcards, input: input["fam"][:-4],
+		prefix=lambda wildcards, output: output["kinship_file1"][:-5],
+	conda: "envs/king.yaml"
+	shell:
+		"""
+		king \
+		-b {params.plink_in}.bed \
+		--kinship \
+		--prefix {params.prefix}
+		"""
+
+
+
+
+rule selectSubsets:
+	input:
+		fam="results/var_sets/{set}.fam",
+		bim="results/var_sets/{set}.bim",
+		bed="results/var_sets/{set}.bed",
+		list="resources/{subset}.tsv",
+	output:
+		fam="results/var_sets/{subset}/{set}.fam",
+		bim="results/var_sets/{subset}/{set}.bim",
+		bed="results/var_sets/{subset}/{set}.bed",
+	resources: cpus=1, mem_mb=90000, time_job=720
+	wildcard_constraints:
+		set="[a-z]+",
+		subset="[a-zA-Z0-9_]+",
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	params:
+		partition=config["medium"],
+		tmp_id="tmp/ind_ids{set}.txt",
+		tmp_fam="tmp/tmp_fam{set}.fam",
+		out_prefix=lambda wildcards, output: output["fam"][:-4]
+	shell:
+		"""
+		cut -f1 {input.list} > {params.tmp_id}
+		cat {input.fam} | grep -f {params.tmp_id} > {params.tmp_fam}
+		
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--keep {params.tmp_fam} \
+		--make-bed \
+		--out {params.out_prefix}
+		"""
+
+# END # GENERAL QC #############################################################################################################################################
+
+# START # PHENO COVAR FILES #############################################################################################################################################
+
+
+rule generate_pheno_files_for_GWAS:
+	input:
+		fam="results/var_sets/EURs_unrel/{set}.fam",
+		bim="results/var_sets/EURs_unrel/{set}.bim",
+		bed="results/var_sets/EURs_unrel/{set}.bed",
+		individual_list="resources/.no_upload/EURs_unrel.tsv",
+	output:
+		fam="results/var_sets/EURs_unrel/{pheno}/{set}.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/{set}.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/{set}.bed",
+		pheno="results/var_sets/EURs_unrel/{pheno}/{set}.pheno",
+	resources: cpus=1, mem_mb=3000, time_job=720
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	wildcard_constraints:
+		set="[a-z]+",
+		pheno="A1|B1",
+	params:
+		partition=config["medium"],
+		path="results/var_sets/EURs_unrel/{pheno}/"
+	shell:
+		"""
+		mkdir -p {params.path} 
+		Rscript workflow/scripts/generate_regenie_pheno.R {input.individual_list} {input.fam} {wildcards.pheno} {output.fam} {output.pheno}
+		
+		cp -f {input.bim} {output.bim}
+		cp -f {input.bed} {output.bed}
+		"""
+
+
+rule additional_GWAS_Specifc_QC:
+	input:
+		fam="results/var_sets/EURs_unrel/{pheno}/common.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/common.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/common.bed",
+	output:
+		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bed",
+	resources: cpus=6, mem_mb=90000, time_job=720, additional=" "
+	params:
+		partition=config["medium"],
+		pathQC="tmp/QC_{pheno}/",
+		out_prefix=lambda wildcards, output: output["fam"][:-4],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		mkdir -p {params.pathQC}
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--filter-cases \
+		--missing \
+		--out {params.pathQC}/Geno05_CR_sex_snp_qc_snpqcCAS
+		
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--filter-controls \
+		--missing \
+		--out {params.pathQC}/Geno05_CR_sex_snp_qc_snpqcCON
+		
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--hardy \
+		--out {params.pathQC}/Geno05_CR_sex_snp_qc_snpqcALL
+				
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--hardy \
+		--chr 23 \
+		--filter-females \
+		--out {params.pathQC}/Geno05_CR_sex_snp_qc_snpqcALL_female
+
+		### R session
+		wd=$(pwd)
+		cp workflow/scripts/additional_QC_cohort.R {params.pathQC}/
+		cd {params.pathQC}
+		Rscript -e 'library(rmarkdown); rmarkdown::render("additional_QC_cohort.R", "html_document")'
+		cd $wd
+		
+		# 1e. final QC (4675116)
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--exclude {params.pathQC}/missingness_hardy_weinberg_filter.txt \
+		--make-bed \
+		--out {params.out_prefix}
+
+		rm -rf {params.pathQC}
+		"""
+
+
+
+rule generate_PCA_covar_for_GWAS:
+	input:
+		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bed",
+	output:
+		eigenv="results/var_sets/EURs_unrel/{pheno}/commonAdQC.eigenvec"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"],
+		folderPCA="results/var_sets/EURs_unrel/{pheno}/",
+		pathinterim="results/var_sets/EURs_unrel/{pheno}/PCAtmp",
+		out_prefix=lambda wildcards, output: output["eigenv"][:-9],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		mkdir -p {params.folderPCA}
+		
+		#common
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--chr 1-22 \
+		--indep-pairwise 50 5 0.05 \
+		--keep-allele-order \
+		--maf 0.01 \
+		--out "{params.pathinterim}"
+
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--extract "{params.pathinterim}.prune.in" \
+		--pca 10 \
+		--out "{params.out_prefix}"
+		
+		rm {params.pathinterim}*
+		"""
+
+
+rule generate_covar_files_GWAS:
+	input:
+		PCA_cov="results/var_sets/EURs_unrel/{pheno}/commonAdQC.eigenvec",
+		individual_list="resources/.no_upload/EURs_unrel.tsv"
+	output:
+		"results/var_sets/EURs_unrel/{pheno}/cov.cov"
+	resources: cpus=1, mem_mb=3000, time_job=720
+	params:
+		partition=config["medium"],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		Rscript workflow/scripts/generate_covar_file.R {input.individual_list} {input.PCA_cov} {output}
+		"""
+
+rule CompilePhenoInfo:
+	input:
+		xl_file=config["pheno_excel"],
+		qc_file="results/hail_gather_data/for_sample_QC.tsv"
+	output:
+		AgePlot="results/plotPhenoInfo/AgePlot.pdf",
+
+	resources: cpus=1, mem_mb=6000, time_job=720, additional=" --ntasks=1 "
+	params:
+		partition=config["medium"],
+		out_dir="results/plotPhenoInfo/",
+	conda: "spark"
+	shell:
+		"Rscript workflow/scripts/compile_phenotype_plots.R {input} {params.out_dir}"
+
+
+
+# END # PHENO COVAR FILES #############################################################################################################################################
+
+# START # GWAS #############################################################################################################################################
+
+
+
+rule Regenie_step2_GWAS:
+	input:
+		cov="results/var_sets/EURs_unrel/{pheno}/cov.cov",
+		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
+		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bed",
+	output:
+		path_reg="results/GWAS/{population}_{pheno}.regenie.gz",
+		path_reg_m="results/GWAS/{population}_{pheno}_male.regenie.gz",
+		path_reg_f="results/GWAS/{population}_{pheno}_female.regenie.gz",
+		path_reg_ge60="results/GWAS/{population}_{pheno}_GE60.regenie.gz",
+		path_reg_lt60="results/GWAS/{population}_{pheno}_LT60.regenie.gz",
+		path_reg_ge60cc="results/GWAS/{population}_{pheno}_GE60CC.regenie.gz",
+		path_reg_lt60cc="results/GWAS/{population}_{pheno}_LT60CC.regenie.gz",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/regenie.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		regenie_step2=lambda wildcards, output: output["path_reg"][:-14]
+	wildcard_constraints:
+		population="EUR",
+	shell:
+		"""
+		regenie \
+		  --step 2 \
+		  --minMAC 5 \
+		  --covarFile {input.cov} \
+		  --phenoFile {input.pheno} \
+		  --bed {params.plink_file} \
+		  --bt \
+		  --ignore-pred \
+		  --write-samples \
+		  --bsize 5000 \
+		  --out {params.regenie_step2} \
+		  --af-cc \
+		  --firth \
+		  --firth-se \
+		  --approx \
+		  --gz
+		  """
+
+
+rule Regenie_step2_GWAS_conditional:
+	input:
+		cov="results/var_sets/EURs_unrel/{pheno}/cov.cov",
+		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
+		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bed",
+		conditional_list="resources/{snp}.list",
+	output:
+		path_reg="results/GWAS/{population}:{snp}_{pheno}.regenie.gz",
+		path_reg_m="results/GWAS/{population}:{snp}_{pheno}_male.regenie.gz",
+		path_reg_f="results/GWAS/{population}:{snp}_{pheno}_female.regenie.gz",
+		path_reg_ge60="results/GWAS/{population}:{snp}_{pheno}_GE60.regenie.gz",
+		path_reg_lt60="results/GWAS/{population}:{snp}_{pheno}_LT60.regenie.gz",
+		path_reg_ge60cc="results/GWAS/{population}:{snp}_{pheno}_GE60CC.regenie.gz",
+		path_reg_lt60cc="results/GWAS/{population}:{snp}_{pheno}_LT60CC.regenie.gz",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/regenie.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		regenie_step2=lambda wildcards, output: output["path_reg"][:-14]
+	shell:
+		"""
+		regenie \
+		  --step 2 \
+		  --minMAC 5 \
+		  --covarFile {input.cov} \
+		  --phenoFile {input.pheno} \
+		  --bed {params.plink_file} \
+		  --condition-list {input.conditional_list} \
+		  --bt \
+		  --ignore-pred \
+		  --write-samples \
+		  --bsize 5000 \
+		  --out {params.regenie_step2} \
+		  --af-cc \
+		  --firth \
+		  --firth-se \
+		  --approx \
+		  --gz
+		  """
+
+rule plink2_GWAS:
+	input:
+		cov="results/var_sets/EURs_unrel/{pheno}/cov.cov",
+		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bed",
+	output:
+		plink_gwas="results/GWAS/{population}_{pheno}.PHENO1.glm.logistic"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/bcftools_plink_R.yaml"
+	params:
+		partition=config["medium"],
+		plink_out=lambda wildcards, output: output["plink_gwas"][:-20]
+	shell:
+		"""
+		plink2 \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		--fam {input.fam} \
+		--glm no-x-sex hide-covar log10 \
+		--covar {input.cov} \
+		--covar-variance-standardize \
+		--out {params.plink_out} \
+		--mac 5
+		  """
+
+
+rule generate_qq_plots:
+	input:
+		path_reg="results/GWAS/{infile}"
+	output:
+		"results/GWAS/{infile}_LOG10P_manhattan.png" 
+	resources: cpus=1, mem_mb=20000, time_job=720
+	params:
+		partition=config["medium"],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		Rscript workflow/scripts/qqplots_GWAS.R -f {input} -o {input} -c CHROM -p LOG10P -b GENPOS --log TRUE -i ID
+		"""
+
+
+
+# END # GWAS #############################################################################################################################################
+
+# START # RVAS #############################################################################################################################################
+
+rule add_PRS_to_COV:
+	input:
+		"results/var_sets/EURs_unrel/{pheno}/cov.cov",
+		"results/PRS/scores.profile"
+	output:
+		"results/var_sets/EURs_unrel/{pheno}/cov_PRS.cov",
+	resources: cpus=1, mem_mb=4000, time_job=720
+	params:
+		partition=config["medium"]
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	script:
+		"scripts/add_PRS_to_COV.R"
+
+
+
+rule gene_sets:
+	input:
+		"resources/gene_sets.tsv",
+		"resources/genomic_ranges.bed",
+		"results/RVAS/data.anno.aaf.file.txt",
+		config["annotations_dir"]+"all_contigs_anno.file.txt",
+		"results/var_sets/EURs_unrel/general.bim",
+	output:
+		"results/RVAS/set.annos.tsv",
+		"results/RVAS/set.aaf.tsv",
+		"results/RVAS/set.sets.tsv",
+		"results/RVAS/relevant_variants.tsv",
+		"results/RVAS/set.vars.bim",
+	resources: cpus=1, mem_mb=40000, time_job=720
+	params:
+		partition=config["medium"]
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	script:
+		"scripts/gene_sets.R"
+
+rule allVarsOneChrom:
+	input:
+		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
+		bed="results/var_sets/EURs_unrel/{pheno}/general.bed",
+		bim="results/RVAS/set.vars.bim",
+		relevant_vars="results/RVAS/relevant_variants.tsv",
+	output:
+		fam="results/var_sets/EURs_unrel/{pheno}/general_oneChr.fam",
+		bed="results/var_sets/EURs_unrel/{pheno}/general_oneChr.bed",
+		bim="results/var_sets/EURs_unrel/{pheno}/general_oneChr.bim",
+	resources: cpus=1, mem_mb=40000, time_job=720
+	conda: "envs/bcftools_plink_R.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["bed"][:-4],
+		plink_out=lambda wildcards, output: output["bed"][:-4]
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--extract {input.relevant_vars} \
+		--make-bed \
+		--out {params.plink_out}
+		"""
+
+
+rule prefilter:
+	input:
+		fam="{plink}.fam",
+		bed="{plink}.bed",
+		bim="{plink}.bim",
+	output:
+		fam="{plink}_{AF}.fam",
+		bed="{plink}_{AF}.bed",
+		bim="{plink}_{AF}.bim",
+	resources: cpus=1, mem_mb=40000, time_job=720
+	conda: "envs/bcftools_plink_R.yaml"
+	wildcard_constraints:
+		AF="0.*[0-9]"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["bed"][:-4],
+		plink_out=lambda wildcards, output: output["bed"][:-4]
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--max-maf {wildcards.AF} \
+		--make-bed \
+		--out {params.plink_out}
+		"""
+
+
+rule Regenie_step2_RVAS_SUM_SKAT:
+	input:
+		cov=lambda wildcards: "results/var_sets/EURs_unrel/{pheno}/cov_PRS.cov" if (wildcards["PRS"]=="PRS") else "results/var_sets/EURs_unrel/{pheno}/cov.cov",
+		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
+		mask_def="resources/mask_definition.mask", #lambda wildcards: "resources/mask_definition.mask" if (wildcards["set"]=="r") else "resources/mask_definitionRegional.mask",
+		plink_file=lambda wildcards: "results/var_sets/EURs_unrel/{pheno}/general_{AF}.bed" if (wildcards["set"]=="r") else "results/var_sets/EURs_unrel/{pheno}/general_oneChr_{AF}.bed",
+		anno_csq=lambda wildcards: config["annotations_dir"]+"all_contigs_anno.file.txt" if (wildcards["set"]=="r") else "results/RVAS/set.annos.tsv",
+                anno_aaf=lambda wildcards: "results/RVAS/data.anno.aaf.file.txt" if (wildcards["set"]=="r") else "results/RVAS/set.aaf.tsv",
+		var_sets=lambda wildcards: config["annotations_dir"]+"all_contigs_set.list.txt" if (wildcards["set"]=="r") else "results/RVAS/set.sets.tsv",
+	output:
+		path_reg="results/RVAS/{set}RVAS_{test}_{population}_POP_{pheno}_{PRS}/{AF}_{pheno}.regenie.gz",
+	resources: cpus=1, mem_mb=72000, time_job=2880
+	wildcard_constraints:
+		test="sum|skato|max",
+		PRS="PRS|regular",
+	conda: "envs/regenie.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["plink_file"][:-4],
+		regenie_step2=lambda wildcards, output: output["path_reg"][:-14],
+		test_params=lambda wildcards: "--build-mask sum --firth --firth-se " if wildcards["test"]=="sum" else ("--vc-tests skato --vc-maxAAF "+ wildcards["AF"] + " --vc-MACthr 10 " if wildcards["test"]=="skato" else "--build-mask max --firth --firth-se "),
+	shell:
+		"""
+		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
+
+		regenie \
+		  --step 2 \
+		  --minMAC 1 \
+		  --covarFile {input.cov} \
+		  --phenoFile {input.pheno} \
+		  --aaf-file {input.anno_aaf} \
+		  --anno-file {input.anno_csq} \
+		  --mask-def {input.mask_def} \
+		  --set-list {input.var_sets} \
+		  --bed {params.plink_file} \
+		  --aaf-bins {wildcards.AF} \
+		  --bt \
+		  --write-samples \
+		  --ignore-pred \
+		  --out {params.regenie_step2} \
+		  {params.test_params} \
+		  --af-cc \
+		  --maxstep-null 2 \
+		  --maxiter-null 100000 \
+		  --gz
+
+		  #--check-burden-files \
+		  #--strict-check-burden \
+		"""
+
+
+
+rule plink_fisher:
+	input:
+		mask_bed="results/RVAS/{set}RVAS_{population}_POP_{pheno}_{AF}_masks.bed",
+		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
+		mask_bim="results/RVAS/{set}RVAS_{population}_POP_{pheno}_{AF}_masks.bim",
+	output:
+		fisher="results/RVAS/plink_{set}RVAS/{population}_POP_{pheno}_{AF}_{pheno}.model",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/bcftools_plink_R.yaml"
+	params:
+		partition=config["medium"],
+		plink_in=lambda wildcards, input: input["mask_bed"][:-4],
+		plink_out=lambda wildcards, output: output["fisher"][:-6]
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bim {input.mask_bim} \
+		--bed {input.mask_bed} \
+		--model fisher \
+		--out {params.plink_out}
+		"""
+
+rule qq_plots_RVAS:
+	input:
+		"{prefix}",
+		"resources/ENSG_to_name.txt"
+	output:
+		"{prefix}QQ.pdf"
+	resources: cpus=1, mem_mb=32000, time_job=720
+	params:
+		burden_test="TRUE",
+		partition=config["medium"]
+	conda:
+		"envs/bcftools_plink_R.yaml"
+	script:
+		"scripts/qq_plots_RVAS.R"
+
+
+# END # RVAS #############################################################################################################################################
+
+# START # PRS #############################################################################################################################################
+
+
+rule calculate_PRS:
+	input:
+		famCommon="results/var_sets/common.fam",
+		bimCommon="results/var_sets/common.bim",
+		bedCommon="results/var_sets/common.bed",
+		PRS="resources/.no_upload/PRSconcat.tsv", # note: this file was modified to contain the variant IDs as used in the bim file
+	output:		
+		scores="results/PRS/scores.profile"
+	resources: cpus=1, mem_mb=32000, time_job=720, additional=" "
+	params:
+		partition=config["medium"],
+		out_pref="results/PRS/scores",
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		plink \
+		--fam {input.famCommon} \
+		--bim {input.bimCommon} \
+		--bed {input.bedCommon} \
+		--score {input.PRS} 1 2 3 sum \
+		--out {params.out_pref}
+		"""
+
+
+# END # PRS #############################################################################################################################################
+
+
+# START # TLR7 ##########################################################################################################################################
+
+rule filter_TLR7_region:
+	input:
+		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/general.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/general.bed",
+	output:		
+		fam="results/var_sets/EURs_unrel/{pheno}/generalTLR7.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bed",
+	resources: cpus=1, mem_mb=32000, time_job=720, additional=" "
+	params:
+		partition=config["medium"],
+		out_plink=lambda wildcards, output: output["bed"][:-4],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		--chr X \
+		--from-bp 12767072 \
+		--to-bp 12967072 \
+		--make-bed \
+		--out {params.out_plink}
+		"""
+
+
+rule Regenie_step2_TLR7:
+	input:
+		cov=lambda wildcards: "results/var_sets/EURs_unrel/{pheno}/cov_PRS.cov" if (wildcards["PRS"]=="PRS") else "results/var_sets/EURs_unrel/{pheno}/cov.cov",
+		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
+		plink_file="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bed",
+	output:
+		path_reg="results/RVAS/TLR7RVAS_EUR_POP_{pheno}_{PRS}/{rec}_{sex}_{pheno}.regenie.gz",
+	resources: cpus=1, mem_mb=72000, time_job=2880
+	wildcard_constraints:
+		PRS="PRS|regular",
+		sex="male|female|any",
+	conda: "envs/regenie.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["plink_file"][:-4],
+		regenie_step2=lambda wildcards, output: output["path_reg"][:-14],
+		rez=lambda wildcards: "--test recessive" if wildcards["rec"]=="rec" else "",
+		sex_param=lambda wildcards: " --sex-specific " + wildcards["sex"] + " --phenoCol " + wildcards["pheno"] if wildcards["sex"]!="any" else "",
+	shell:
+		"""
+		export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
+
+		regenie \
+		  --step 2 \
+		  --minMAC 1 \
+		  --covarFile {input.cov} \
+		  --phenoFile {input.pheno} \
+		  --bed {params.plink_file} \
+		  --bt \
+		  --firth \
+		  --firth-se \
+		  --write-samples \
+		  --ignore-pred \
+		  --out {params.regenie_step2} \
+		  {params.rez} \
+		  {params.sex_param} \
+		  --af-cc \
+		  --bsize 500 \
+		  --gz
+		"""
+
+
+rule TLR7PlinkFisher:
+	input:
+		fam="results/var_sets/EURs_unrel/{pheno}/generalTLR7.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bed",
+	output:
+		fisher="results/RVAS/TLR7PlinkFisher/{sex}_{pheno}.model",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/bcftools_plink_R.yaml"
+	wildcard_constraints:
+		sex="male|female|any",
+	params:
+		partition=config["medium"],
+		plink_out=lambda wildcards, output: output["fisher"][:-6],
+		sex_param=lambda wildcards: "--filter-females" if wildcards["sex"]=="female" else ("--filter-males" if wildcards["sex"]=="male" else ""),
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		{params.sex_param} \
+		--model fisher \
+		--out {params.plink_out}
+		"""
+
+rule TLR7Plinkcounts:
+	input:
+		fam="results/var_sets/EURs_unrel/{pheno}/generalTLR7.fam",
+		bim="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bim",
+		bed="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bed",
+	output:
+		cases="results/RVAS/TLR7PlinkFisher/{sex}_{pheno}_cases.frqx",
+		controls="results/RVAS/TLR7PlinkFisher/{sex}_{pheno}_controls.frqx",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/bcftools_plink_R.yaml"
+	wildcard_constraints:
+		sex="male|female|any",
+	params:
+		partition=config["medium"],
+		out_case=lambda wildcards, output: output["cases"][:-5],
+		out_ctrl=lambda wildcards, output: output["controls"][:-5],
+		sex_param=lambda wildcards: "--filter-females" if wildcards["sex"]=="female" else ("--filter-males" if wildcards["sex"]=="male" else ""),
+	shell:
+		"""
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		{params.sex_param} \
+		--filter-cases \
+		--freqx \
+		--out {params.out_case}
+		
+		plink \
+		--fam {input.fam} \
+		--bim {input.bim} \
+		--bed {input.bed} \
+		{params.sex_param} \
+		--filter-controls \
+		--freqx \
+		--out {params.out_ctrl}		
+		"""
+
+# END # TLR7 ############################################################################################################################################
+
+
+# START # ROH #############################################################################################################################################
+
+
+rule Extract_Rohs_plink:
+	input:
+		fam="results/CommonVars/CommonVars.fam",
+	output:
+		ROH_file=multiext("results/ROH/bedForROHAnalysis_ROH", ".hom", ".hom.indiv", ".hom.summary", ".log")
+	resources: cpus=12, mem_mb=48000, time_job=720, additional=" --gres localtmp:200G --ntasks=1 -x " + config["master_nodes_excluded"]
+	params:
+		partition=config["medium"],
+		plink_in=lambda wildcards, input: input["fam"][:-4],
+		ROH_out="results/ROH/bedForROHAnalysis_ROH",
+	conda: "spark"
+	shell:
+		"""
+		plink --bfile {params.plink_in} --out {params.ROH_out} --homozyg
+		"""
+
+rule Extract_Rohs_bcftools:
+	input:
+		vcf_for_GWAS="results/CommonVars/CommonVars.vcf.bgz",
+	output:		
+		ROH_file="results/ROH/test_roh.tsv.gz",
+	resources: cpus=6, mem_mb=24000, time_job=720, additional=" "
+	params:
+		partition=config["medium"],
+		out_dir="results/ROH/",
+	conda: "spark"
+	shell:
+		"""
+		mkdir -p {params.out_dir}
+
+
+		# the code here could e.g. look like this:
+		bcftools roh {input.vcf_for_GWAS} --AF-tag AF -G30 --threads 6 | \
+		 gzip > {output.ROH_file}
+		"""
+
+# END # ROH #############################################################################################################################################
+
+
+
+
+# START # RVTESTS #####################################################################################################################################
+
+rule dev_test_rvtest:
+        input:
+                expand("results/rvtests/results_Fisher/EUR_POP_{pheno}/{mask}_{af_cutoff}.CMCFisherExact.assoc",
+                pheno=config["phenotypes"],mask=config["masks"], af_cutoff=config["af_cutoffs"]),
+#                expand("results/rvtests/results_EUR_POP_{pheno}/{mask}_{af_cutoff}.Skat.assoc",
+#                pheno=config["phenotypes"],mask=config["masks"], af_cutoff=config["af_cutoffs"]),
+                #vcf_out="results/rvtests/var_subsets/M3_0.01.vcf.gz",
+                #out_file="results/rvtests/results/M3_0.01.Skat.assoc",
+        resources: cpus=4, mem_mb=16000, time_job=720
+        params:
+                partition=config["medium"],
+
+
+rule calc_freq_plink:
+        input:
+                fam="results/var_sets/EURs_unrel/general.fam",
+                bim="results/var_sets/EURs_unrel/general.bim",
+                bed="results/var_sets/EURs_unrel/general.bed",
+        output:
+                data_af_file="results/RVAS/plink_freq.afreq",
+                data_ac_file="results/RVAS/plink_freq.acount",
+        resources: cpus=4, mem_mb=64000, time_job=720
+        params:
+                partition=config["medium"],
+                plink_in_prefix=lambda wildcards, input: input.fam[:-4],
+                freq_out_prefix=lambda wildcards, output: output.data_af_file[:-6],
+                ac_out_prefix=lambda wildcards, output: output.data_ac_file[:-7],
+        conda:
+                "envs/bcftools_plink_R.yaml"
+        shell:
+                """
+                plink2 --bfile {params.plink_in_prefix} --freq --out {params.freq_out_prefix}
+                plink2 --bfile {params.plink_in_prefix} --freq counts --out {params.ac_out_prefix}
+                """
+
+rule merge_aaf_files_data_anno:
+        input:
+                data_af_file="results/RVAS/plink_freq.afreq",
+                data_ac_file="results/RVAS/plink_freq.acount",
+                regenie_aaf_file=config["annotations_dir"]+"all_contigs_aaf.file.txt",
+        output:
+                data_anno_aaf_file="results/RVAS/data.anno.aaf.file.txt"
+        resources: cpus=4, mem_mb=32000, time_job=720
+        params:
+                partition=config["medium"],
+        run:
+                import pandas as pd
+                import numpy as np
+                data_af = pd.read_csv(input.data_af_file, sep="\s+")
+                data_af=data_af[["ID","ALT_FREQS"]]
+                anno_af = pd.read_csv(input.regenie_aaf_file, sep=" ", names=["snp", "aaf"])
+                joined = data_af.join(anno_af.set_index("snp"), on="ID", how="inner")
+                joined["merged_aaf"] = joined[["ALT_FREQS", "aaf"]].max(axis=1)
+                
+                # added AC check - however - this is not effective with the current sample size)
+                data_ac = pd.read_csv(input.data_ac_file, sep="\s+")
+                data_ac=data_ac[["ID","ALT_CTS"]]
+                joined_AC=joined.join(data_ac.set_index("ID"), on="ID", how="inner")
+                joined_AC["merged_aaf"] = np.where( (joined_AC.ALT_CTS > 2) & (joined_AC.merged_aaf<0.001), 0.005, joined_AC.merged_aaf)
+                joined_AC.merged_aaf = joined_AC.merged_aaf.round(4)
+                joined_AC[["ID", "merged_aaf"]].to_csv(output.data_anno_aaf_file, sep=" ", header=False, index=False, float_format='%.5E')
+
+
+
+rule plink_subset_for_rvtest:
+        input:
+                fam="results/var_sets/EURs_unrel/general.fam",
+                bim="results/var_sets/EURs_unrel/general.bim",
+                bed="results/var_sets/EURs_unrel/general.bed",
+                regenie_anno_file=config["annotations_dir"]+"all_contigs_anno.file.txt",
+                data_anno_aaf_file="results/RVAS/data.anno.aaf.file.txt",
+#                regenie_aaf_file=config["annotations_dir"]+"all_contigs_aaf.file.txt",
+                regenie_mask_def="resources/mask_definition.mask",
+        output:
+                expand("results/rvtests/var_subsets/{mask}_{af_cutoff}.{suffix}",
+                mask=config["masks"], af_cutoff=config["af_cutoffs"],
+                suffix=["fam", "bim", "bed"]),
+                setFile_rvtest="results/rvtests/rvtest_setFile.tsv",
+                debug_joined_out="results/rvtests/debug_joined_out.tsv"
+        resources: cpus=4, mem_mb=32000, time_job=720
+        params:
+                partition=config["medium"],
+                plink_in_prefix=lambda wildcards, input: input.fam[:-4],
+                plink_out_folder="results/rvtests/var_subsets/",
+                masks=config["masks"],
+                af_cutoffs=config["af_cutoffs"],
+        conda: "envs/pandas_plink.yaml"
+        script: "scripts/plink_subset_for_rvtest.py"
+
+rule plink_subset_to_vcf_for_rvtest:
+        # Split the vcf, extract all variants specified
+        # TODO remove the --chr 21 constraint in plink2 comand (now there for performance reasons)
+        input:
+                fam="results/rvtests/var_subsets/{mask}_{af_cutoff}.fam",
+                bim="results/rvtests/var_subsets/{mask}_{af_cutoff}.bim",
+                bed="results/rvtests/var_subsets/{mask}_{af_cutoff}.bed",
+        output:
+                vcf_out="results/rvtests/var_subsets/{mask}_{af_cutoff}.vcf.gz",
+        resources: cpus=4, mem_mb=16000, time_job=720
+        params:
+                partition=config["medium"],
+                plink_in_prefix=lambda wildcards, input: input.fam[:-4],
+                vcf_out_prefix=lambda wildcards, output: output.vcf_out[:-7],
+        conda:
+                "envs/bcftools_plink_R.yaml"
+        shell:
+                """
+                plink2 --bfile {params.plink_in_prefix} --export vcf bgz id-paste=iid --out {params.vcf_out_prefix} --allow-extra-chr
+                bcftools index -f -t {params.vcf_out_prefix}.vcf.gz
+                """
+
+
+rule pheno_file_for_rvtest:
+        input:
+                fam="results/var_sets/EURs_unrel/general.fam",
+                phenotypes="results/var_sets/EURs_unrel/{pheno}/common.pheno",
+        output:
+                rvtest_pheno_file="results/rvtests/pheno_EUR_{pheno}.tsv",
+        resources: cpus=4, mem_mb=16000, time_job=720
+        params:
+                partition=config["medium"],
+        run:
+                import pandas as pd
+                fam = pd.read_csv(input.fam, names=["fid", "iid","fatid","matid","sex","empty"], sep=' ')
+                pheno = pd.read_csv(input.phenotypes, names=["fid","iid","pheno"], sep='\t', header=0).set_index("iid")
+                pheno.head()
+                out = fam.join(pheno.pheno, on="iid")
+                out.pheno = out.pheno + 1
+                out[["fid", "iid","fatid","matid","sex","pheno"]].to_csv(output.rvtest_pheno_file, sep="\t", header=False, index=False)
+
+rule rvtest_SKAT:
+        input:
+                invcf="results/rvtests/var_subsets/{mask}_{af_cutoff}.vcf.gz",
+                fam="results/var_sets/EURs_unrel/general.fam",
+                setFile_rvtest="results/rvtests/rvtest_setFile.tsv",
+                rvtest_pheno_file="results/rvtests/pheno_{population}_{pheno}.tsv",
+#                covar_file="covariates.cov",
+        output:
+                out_file="results/rvtests/results_SKAT/{population}_POP_{pheno}/{mask}_{af_cutoff}.Skat.assoc",
+        resources: cpus=4, mem_mb=16000, time_job=720
+        params:
+                partition=config["medium"],
+                out_prefix=lambda wildcards, output: output.out_file[:-11],
+        conda:
+                "envs/rvtests.yaml"
+        shell:
+                """
+                rvtest \
+                --inVcf {input.invcf} \
+                --pheno {input.rvtest_pheno_file} \
+                --setFile {input.setFile_rvtest} \
+                --noweb \
+                --kernel skat \
+                --out {params.out_prefix}
+                """
+
+
+rule rvtest_fisher:
+        input:
+                invcf="results/rvtests/var_subsets/{mask}_{af_cutoff}.vcf.gz",
+                fam="results/var_sets/EURs_unrel/general.fam",
+                setFile_rvtest="results/rvtests/rvtest_setFile.tsv",
+                rvtest_pheno_file="results/rvtests/pheno_{population}_{pheno}.tsv",
+#                covar_file="covariates.cov",
+        output:
+                out_file="results/rvtests/results_Fisher/{population}_POP_{pheno}/{mask}_{af_cutoff}.CMCFisherExact.assoc",
+        resources: cpus=4, mem_mb=16000, time_job=720
+        params:
+                partition=config["medium"],
+                out_prefix=lambda wildcards, output: output.out_file[:-21],
+        conda:
+                "envs/rvtests.yaml"
+        shell:
+                """
+                rvtest \
+                --inVcf {input.invcf} \
+                --pheno {input.rvtest_pheno_file} \
+                --setFile {input.setFile_rvtest} \
+                --noweb \
+                --burden exactCMC \
+                --out {params.out_prefix}
+                """
+
+_ = """
+                --pheno-name target \
+                --covar {input.covar_file} \
+                --covar-name sex,age,PC1,PC2,PC3,PC4,PC5,PC6,PC7,PC8,PC9,PC10 \
+"""
+
+
+
+
+
+# END # RVTESTS #####################################################################################################################################
+# START # REGIONAL TESTS #####################################################################################################################################
+
+
+
+
+rule rvtest_SKAT_regional:
+        input:
+                invcf="results/var_sets/EURs_unrel/general.vcf.bgz",
+                fam="results/var_sets/EURs_unrel/general.fam",
+                setFile_rvtest="results/rvtests/regional_rvtest_setFile.tsv",
+                rvtest_pheno_file="results/rvtests/pheno_{population}_{pheno}.tsv",
+#                covar_file="covariates.cov",
+        output:
+                out_file="results/rvtests/results_SKAT_regional/{population}_POP_{pheno}/{mask}_{af_cutoff}.Skat.assoc",
+        resources: cpus=4, mem_mb=16000, time_job=720
+        params:
+                partition=config["medium"],
+                out_prefix=lambda wildcards, output: output.out_file[:-11],
+        conda:
+                "envs/rvtests.yaml"
+        shell:
+                """
+                rvtest \
+                --inVcf {input.invcf} \
+                --pheno {input.rvtest_pheno_file} \
+                --setFile {input.setFile_rvtest} \
+                --noweb \
+                --kernel skat \
+                --out {params.out_prefix}
+                """
+
+
+# END # REGIONAL TESTS #####################################################################################################################################
+# START # GENOME SCANNING #####################################################################################################################################
+
+rule genome_scan:
+        input:
+                phenofam="results/rvtests/pheno_{population}_{pheno}.tsv",
+                bim="results/var_sets/EURs_unrel/general.bim",
+                bed="results/var_sets/EURs_unrel/general.bed",
+                temp="resources/GECS_template.param",
+        output:
+                fam="results/genomeScan/genomeScan{population}_{pheno}G.fam",
+        resources: cpus=4, mem_mb=64000, time_job=720
+        params:
+                partition=config["medium"],
+                out_dir="results/genomeScan",
+                out_prefix="results/genomeScan/genomeScan{population}_{pheno}"
+        conda:
+                "envs/bcftools_plink_R.yaml"
+        shell:
+                """
+                cp -f {input.phenofam} {params.out_prefix}G.fam
+                cp -f {input.bim} {params.out_prefix}G.bim
+                cp -f {input.bed} {params.out_prefix}G.bed
+
+                cp {input.temp} {params.out_prefix}.param
+                
+                sed -i "s:bfile:{params.out_prefix}G:g" {params.out_prefix}.param
+                sed -i "s:outx:{params.out_prefix}:g" {params.out_prefix}.param
+                
+                resources/.no_upload/GECS/gecs {params.out_prefix}.param
+
+                rm -f {params.out_prefix}G.b*
+                """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# END # GENOME SCANNING #####################################################################################################################################
+# START # OLD / ARRAY based QC #####################################################################################################################################
+
+
+
+
+
+
+rule extract_dbSNP_file:
+	input:
+		"resources/.no_upload/dbSNP_hg38_pos_chr18_dedup.txt.gz"
+	output:
+		pos="results/array_comparison/dbSNP_pos.txt",
+		ids="results/array_comparison/dbSNP_ids.txt",
+	resources: cpus=1, mem_mb=4000, time_job=720
+	params:
+		partition=config["medium"],
+	shell:
+		"""
+		zcat {input} > {output.pos}
+		zcat {input} | cut -f1 -d" " > {output.ids}
+		"""
+rule rename_plink_array:
+	input:
+		arrayfam=config["array_files"],
+		dbSNP_ids="results/array_comparison/dbSNP_ids.txt",
+		dbSNP_pos="results/array_comparison/dbSNP_pos.txt"
+	output:	
+		array_fam="results/array_comparison/array_local.fam",
+	resources: cpus=2, mem_mb=16000, time_job=2880
+	params:
+		partition=config["long"],
+		ar_pl_in=lambda wildcards, input: input["arrayfam"][:-4],
+		ar_pl_out=lambda wildcards, output: output["array_fam"][:-4],
+	conda: "spark"
+	shell:
+		"""
+		plink \
+		 --bfile "{params.ar_pl_in}" \
+		 --extract "{input.dbSNP_ids}" \
+		 --make-bed \
+		 --out {params.ar_pl_out}_tmp1
+		
+		plink \
+		 --bfile {params.ar_pl_out}_tmp1 \
+		 --update-map "{input.dbSNP_pos}" 3 1 \
+		 --make-bed \
+		 --out {params.ar_pl_out}
+		
+		awk '{{print $2"ARRAY",$2"ARRAY",$3,$4,$5,$6}}' {params.ar_pl_out}.fam > {params.ar_pl_out}_tmp.fam
+
+		mv {params.ar_pl_out}_tmp.fam {params.ar_pl_out}.fam
+		rm -f {params.ar_pl_out}_tmp*
+		"""
+
+rule make_plink_seq_data:
+	input:
+		vcf="results/normalized/df3_norm.vcf.gz",
+		array_fam="results/array_comparison/array_local.fam",
+		dbSNP_pos="results/array_comparison/dbSNP_pos.txt"
+	output:
+		allplink="results/array_comparison/seq.fam"
+	resources: cpus=4, mem_mb=20000, time_job=2880
+	params:
+		partition=config["long"],
+		plink_pref=lambda wildcards, output: output["allplink"][:-4],
+		array_plink=lambda wildcards, input: input["array_fam"][:-4],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		echo "start"
+		
+		plink \
+		 --vcf {input.vcf} \
+		 --chr 18,19,20,21 \
+		 --vcf-half-call h \
+		 --double-id \
+		 --make-bed \
+		 --out {params.plink_pref}_tmp
+		
+		plink \
+		--bfile {params.plink_pref}_tmp \
+		--update-name "{input.dbSNP_pos}" 1 4 \
+		--make-just-bim \
+		--out {params.plink_pref}_tmp2
+		
+		cat {params.plink_pref}_tmp2.bim | sed "s/chr//g" > {params.plink_pref}_tmp.bim
+		
+
+		plink \
+		--fam {params.plink_pref}_tmp.fam \
+		--bed {params.plink_pref}_tmp.bed \
+		--bim {params.plink_pref}_tmp.bim \
+		--extract {params.array_plink}.bim \
+		--make-bed \
+		--out {params.plink_pref}
+		
+		rm -f {params.plink_pref}_tmp*
+		""" 
+		
+
+
+rule compare_w_array_king:
+	input:
+		array_fam="results/array_comparison/array_local.fam",
+		sequencing_fam="results/array_comparison/seq.fam",
+	output:	
+		kinship_vals="results/array_comparison/array_comp.con",
+	resources: cpus=4, mem_mb=32000, time_job=720
+	params:
+		partition=config["medium"],
+		hl_pl=lambda wildcards, input: input["sequencing_fam"][:-4],
+		ar_pl=lambda wildcards, input: input["array_fam"][:-4],
+		king_prefix=lambda wildcards, output: output["kinship_vals"][:-4],
+		
+	conda: "envs/king.yaml"
+	shell:
+		"""
+		#module load king
+	
+		king \
+		-b {params.hl_pl}.bed,{params.ar_pl}.bed \
+		--duplicate \
+		--related \
+		--degree 1 \
+		--prefix {params.king_prefix}
+		
+		king \
+		-b {params.hl_pl}.bed,{params.ar_pl}.bed \
+		--kinship \
+		--prefix {params.king_prefix}_kinship
+		
+		"""
+
+
+
+rule Regenie_step1:
+	input:
+		pathCov="results/regenie_pheno/cov_{population}_{pheno}.cov",
+		pathPheno="results/regenie_pheno/pheno_{population}_{pheno}.pheno", 
+		filtered="results/regenie/pheno_{population}_{pheno}_pruned_plink.txt",
+		fam="results/var_sets/for_QC/common_pruned.fam",
+		bim="results/var_sets/for_QC/common_pruned.bim",
+		bed="results/var_sets/for_QC/common_pruned.bed",
+	output:
+		step1="results/regenie/pheno_{population}_{pheno}_step1_pred.list"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/regenie.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		step1=lambda wildcards, output: output["step1"][:-10],
+	shell:
+		"""
+		#export LD_LIBRARY_PATH={config[LD_LIBRARY_PATH]}
+		
+		regenie \
+		  --step 1 \
+		  --bed {params.plink_file} \
+		  --covarFile {input.pathCov} \
+		  --phenoFile {input.pathPheno} \
+		  --bt \
+		  --extract {input.filtered} \
+		  --loocv \
+		  --bsize 1000 \
+		  --out {params.step1}
+		#--extract input.pruned \
+		 """
+
+
+rule make_pheno_cov_saige:
+	input:
+		pathCov="results/regenie_pheno/cov_{population}_{pheno}.cov",
+		pathPheno="results/regenie_pheno/pheno_{population}_{pheno}.pheno", 
+	output:
+		"results/regenie_pheno/cov_{population}_{pheno}.phenocov",
+		"results/regenie_pheno/cov_{population}_{pheno}.males",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"],
+	conda: "envs/bcftools_plink_R.yaml"
+	script: "scripts/make_phenoCov.R"
+
+
+rule get_plink_step1:
+	input:
+		keep_fam="results/regenie_pheno/fam_{population}_{pheno}.fam",
+		fam="results/var_sets/for_QC/common_pruned.fam",
+		bim="results/var_sets/for_QC/common_pruned.bim",
+		bed="results/var_sets/for_QC/common_pruned.bed",
+		longrange_LD="resources/regions_longrange_LD_GRCh38.txt",
+	output:
+		fam="results/regenie/pheno_{population}_{pheno}_pruned_plink.fam",
+		bim="results/regenie/pheno_{population}_{pheno}_pruned_plink.bim",
+		bed="results/regenie/pheno_{population}_{pheno}_pruned_plink.bed",
+		var_ids="results/regenie/pheno_{population}_{pheno}_pruned_plink.txt",
+	resources: cpus=1, mem_mb=10000, time_job=720
+	params:
+		partition=config["medium"],
+		pruned_plink=lambda wildcards, output: output["bim"][:-4],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		# LD pruned variants for regenie step 1
+		plink \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--fam {input.fam} \
+		--keep {input.keep_fam} \
+		--maf 0.01 \
+		--chr 1-22 \
+		--geno 0.01 \
+		--snps-only just-acgt \
+		--hwe 1e-10 \
+		--exclude range {input.longrange_LD} \
+		--make-bed \
+		--out {params.pruned_plink}
+		
+		cut -f2 {output.bim} > {output.var_ids}
+		
+		"""
+
+
+rule SAGE_step1:
+	input:
+		phenocov="results/regenie_pheno/cov_{population}_{pheno}.phenocov",
+		fam="results/regenie/pheno_{population}_{pheno}_pruned_plink.fam",
+		bim="results/regenie/pheno_{population}_{pheno}_pruned_plink.bim",
+		bed="results/regenie/pheno_{population}_{pheno}_pruned_plink.bed",
+	output:
+		step1="results/saige/pheno_{population}_{pheno}.rda"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/saige.yaml"
+	params:
+		partition=config["medium"],
+		plink_file=lambda wildcards, input: input["fam"][:-4],
+		step1=lambda wildcards, output: output["step1"][:-4],
+	shell:
+		"""
+		step1_fitNULLGLMM.R \
+		--plinkFile={params.plink_file} \
+		--phenoFile={input.phenocov} \
+		--phenoCol={wildcards.pheno} \
+		--covarColList=PC1,PC2,PC3,PC4,PC5,PC6,PC7,PC8,PC9,PC10,Age,Age2,age_sex,sex_for_fam \
+		--sampleIDColinphenoFile=IID \
+		--traitType=binary \
+		--outputPrefix={params.step1} \
+		--LOCO=TRUE \
+		--IsOverwriteVarianceRatioFile=TRUE \
+		--nThreads=4
+		"""
+
+rule make_saige_vcf_from_plink:
+	input:
+		bed="results/additional_QC/{population}_{pheno}/not_rel_QCed.bed",
+		bim="results/additional_QC/{population}_{pheno}/not_rel_QCed.bim",
+		fam="results/additional_QC/{population}_{pheno}/not_rel_QCed.fam"
+	output:
+		vcf="results/additional_QC/{population}_{pheno}/not_rel_QCed.vcf.gz",
+		vcf_justX="results/additional_QC/{population}_{pheno}/not_rel_QCed_justX.vcf.gz",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"],
+		vcfprefix=lambda wildcards, output: output["vcf"][:-7],
+		vcfprefix_justX=lambda wildcards, output: output["vcf_justX"][:-7],
+		plink_in=lambda wildcards, input: input["fam"][:-4],
+	conda: "envs/bcftools_plink_R.yaml"
+	shell:
+		"""
+		plink \
+		--bfile {params.plink_in} \
+		--recode vcf-iid \
+		--out {params.vcfprefix}
+		
+		cat  {params.vcfprefix}.vcf | bgzip > {output.vcf}
+		tabix --csi -pvcf {output.vcf}
+
+		plink \
+		--bfile {params.plink_in} \
+		--recode vcf-iid \
+ 		--chr X \
+		--out {params.vcfprefix_justX}
+
+ 		cat  {params.vcfprefix_justX}.vcf | bgzip > {output.vcf_justX}
+ 		tabix --csi -pvcf {output.vcf_justX}
+		
+		"""
+
+rule SAIGE_step2_GWAS:
+	input:
+		pathCov="results/regenie_pheno/cov_{population}_{pheno}.cov",
+		pathPheno="results/regenie_pheno/pheno_{population}_{pheno}.pheno",
+		step1="results/saige/pheno_{population}_{pheno}.rda",
+		vcf="results/additional_QC/{population}_{pheno}/not_rel_QCed.vcf.gz",
+		vcf_justX="results/additional_QC/{population}_{pheno}/not_rel_QCed_justX.vcf.gz",
+		males="results/regenie_pheno/cov_{population}_{pheno}.males",
+	output:
+		path_saige="results/saige/{chrom}GWAS_{population}_{pheno}.saige.txt"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	conda: "envs/saige.yaml"
+	params:
+		partition=config["medium"],
+		saige_step1=lambda wildcards, input: input["step1"][:-4],
+		in_vcf=lambda wildcards, input: input["vcf_justX"] if (str(wildcards["chrom"])=="23") else input["vcf"],
+		loco=lambda wildcards, input: "--LOCO=TRUE --chrom=" + str(wildcards["chrom"]) if (str(wildcards["chrom"])!="23") else "--LOCO=FALSE --chrom=23 --X_PARregion=10001-2781479,155701383-156030895 --sampleFile_male="+input["males"]+" --is_rewrite_XnonPAR_forMales=TRUE",
+	shell:
+		"""
+		
+		step2_SPAtests.R \
+		--vcfField=GT \
+		--GMMATmodelFile={params.saige_step1}.rda \
+		--varianceRatioFile={params.saige_step1}.varianceRatio.txt \
+		--SAIGEOutputFile={output} \
+		--numLinesOutput=1000 \
+		--IsOutputNinCaseCtrl=TRUE \
+		--IsOutputHetHomCountsinCaseCtrl=TRUE \
+		--minMAC=3 \
+		--IsOutputAFinCaseCtrl=TRUE \
+		--vcfFile={params.in_vcf} {params.loco}	
+
+		"""
+
+rule merge_saige_GWAS:
+	input:
+		expand("results/saige/{chrom}GWAS_{population}_{pheno}.saige.txt", chrom=config["contigs_wo_X"]+[23], allow_missing=True)
+	output:
+		path_saige="results/saige/allChrGWAS_{population}_{pheno}.saige.txt.gz"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		header="results/saige/GWAS_{population}_{pheno}_header.txt",
+		partition=config["medium"],
+	shell:
+		"""
+		if cat {input} | grep "CHR" | head -n1 > {params.header}
+		then
+		echo "don't worry"
+		fi
+
+		cat {input} | grep -v "CHR" | \
+		cat {params.header} - |
+		gzip > {output}
+		"""
+
+rule ApplyRelatednessFilter:
+	input:
+		GWAS_MT="results/prune_filter/filtered",
+		pheno_file="results/hail_gather_data/for_sample_QC.tsv"
+	output:		
+		kinship_vals="results/kinship/hail_kinship_coefficients.tsv",
+		to_remove="results/kinship/relatives_to_remove.tsv",
+	resources: cpus=8, mem_mb=80000, time_job=2880, additional=" --ntasks=1 -x " + config["master_nodes_excluded"] #--gres localtmp:300G 
+	params:
+		partition=config["long"],
+		tmp_dir=config["tmp_folder"] +"kinship/",
+	conda: "spark"
+	shell:
+		"""	
+		mkdir -p {params.tmp_dir}
+		
+		hail_python_script="workflow/scripts/relatedness_filter.py $(pwd)/{input.GWAS_MT} $(pwd)/{params.tmp_dir} $(pwd)/{input.pheno_file} $(pwd)/{output.kinship_vals} $(pwd)/{output.to_remove}"
+		
+		if [ {config[cluster]} = "yes" ]; then
+		queue="long"
+		hours_to_run=168
+		DRIVE_MEM=78
+		worker_nodes_excluded={config[worker_nodes_excluded]}
+		num_workers=20
+		source workflow/scripts/spark_submit_command.sh
+		$spark_submit_command $hail_python_script
+		
+		else
+		python $hail_python_script
+		fi
+		
+		rm -rf {params.tmp_dir}*
+		"""

@@ -1,0 +1,11 @@
+pLoF pLoF
+strong_COD pLoF,missense.revel07
+medium_COD pLoF,missense.revel07,moderate,missense.revel05,missense.revel03
+PROM promoter,promoter_CADD
+PROM_CADD promoter_CADD
+UTR5 UTR5_CADD,UTR5
+UTR5_CADD UTR5_CADD
+UTR3 UTR3_CADD,UTR3
+UTR3_CADD UTR3_CADD
+ENH enhancer_CADD,enhancer
+ENH_CADD enhancer_CADD
