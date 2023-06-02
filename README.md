@@ -43,7 +43,7 @@ sbatch run.sh
 
 You can also test the pipeline e.g. by running snakemake -np
 
-Here are the DAGs of some analyses that were conducted:
+Here are the DAGs of some analyses that were conducted - the names of the rules are indicated.
 
 Population-PCA:
 
@@ -63,6 +63,10 @@ Not all input files that were used for the pipeline are included in this reposit
 - genotype data / cohort bcf, which was produced by glnexus. The path ("input_vcf") can be set in the file config/config.yaml.
 - fasta file of the reference genome (here hg38). The path ("fasta") can be set in the file config/config.yaml.
 - Data of the 1000 genomes project; You only need to provide a folder; there is a snakemake-rule ("download_1000G_genotypes") to download the data. The path ("location_1000G") can be set in the file config/config.yaml.
-- Phenotype files are not included due to privacy issues
+- Phenotype files are not included due to privacy issues; see resources folder for a short description of those files (for reference only).
+- several annotation sources for VEP are not included, which were placed in the folder indicated under the variable "database_dir" in the config file: 
+"gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.bgz" source: https://gnomad.broadinstitute.org/downloads#v2-liftover , 
+"dbNSFP4.1a_hg38.gz" source: https://sites.google.com/site/jpopgen/dbNSFP - prepared as described in https://github.com/Ensembl/VEP_plugins/blob/release/102/dbNSFP.pm 
+"spliceai_scores_sorted.hg38.vcf.gz" source: downloaded from https://basespace.illumina.com/s/otSPW8hnhaZR , then sorted by chrom:pos and bgziped
 
 
