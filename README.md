@@ -1,6 +1,6 @@
 # DeCOI_WGS
 
-Pipeline for QC, GWAS and gene-based collapsing within the DeCOI WGS cohort (1220 individuals). Rules for ROH-analysis and gene-set based analyses are also included. This repository is for documentary purposes and the pipeline will not run out of the box - e.g. adjustments are needed for the local compute environment and not all inpute files (e.g. genotype files, phenotype files, annotation sources) are not provided.
+Pipeline for QC, GWAS and gene-based collapsing within the DeCOI WGS cohort (1220 individuals). Rules for ROH-analysis and gene-set based analyses are also included. This repository is for documentary purposes and the pipeline will not run out of the box - e.g. adjustments are needed for the local compute environment and not all inpute files (e.g. genotype files, phenotype files, annotation sources) are provided.
 
 ## Setup
 This pipeline was run on a compute cluster running Linux (CentOS Linux 7) and slurm 22.05.6. Miniconda3 was manually installed (https://docs.conda.io/en/latest/miniconda.html).
