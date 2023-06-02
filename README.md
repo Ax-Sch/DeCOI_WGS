@@ -2,7 +2,7 @@
 
 Pipeline for QC of the DeCOI WGS Samples (~1200). This repository is for documentary purposes.
 
-Setup:
+## Setup
 This pipeline was run on a compute cluster running CentOS Linux 7, slurm 22.05.6. Miniconda3 was manually installed (https://docs.conda.io/en/latest/miniconda.html).
 The setup is quiet complex, due to the use of the slurm scheduler and the use of Apache Spark. The setup was done roughly in the following way:
 
@@ -37,6 +37,6 @@ Then the pipeline was run by using the file "run.sh"; this file also needs adjus
 conda activate snakemake7
 sbatch run.sh
 
-Inputs:
+## Inputs
 This pipeline was run on the joint called cohort bcf, which was produced by glnexus. The path ("input_vcf") can be set in the file config/config.yaml.
 
