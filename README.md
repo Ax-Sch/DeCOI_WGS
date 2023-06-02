@@ -46,12 +46,15 @@ You can also test the pipeline e.g. by running snakemake -np
 Here are the DAGs of some analyses that were conducted:
 
 Population-PCA:
+
 ![PCA Pipeline](dag_PCA.png)
 
 GWAS:
+
 ![GWAS Pipeline](dag_GWAS.png)
 
 RVAS:
+
 ![RVAS Pipeline](dag_RVAS.png)
 
 
