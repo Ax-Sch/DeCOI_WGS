@@ -66,7 +66,7 @@ Not all input files that were used for the pipeline are included in this reposit
 - Phenotype files are not included due to privacy issues; see resources folder for a short description of those files (for reference only).
 - several annotation sources for VEP are not included, which were placed in the folder indicated under the variable "database_dir" in the config file: <br>
 "gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.bgz" source: https://gnomad.broadinstitute.org/downloads#v2-liftover , <br>
-"dbNSFP4.1a_hg38.gz" source: https://sites.google.com/site/jpopgen/dbNSFP - prepared as described in https://github.com/Ensembl/VEP_plugins/blob/release/102/dbNSFP.pm <br>
-"spliceai_scores_sorted.hg38.vcf.gz" source: downloaded from https://basespace.illumina.com/s/otSPW8hnhaZR , then sorted by chrom:pos and bgziped <br>
+"dbNSFP4.1a_hg38.gz" source: https://sites.google.com/site/jpopgen/dbNSFP - the prepared for VEP/the dbNSFP plugin of VEP as described in https://github.com/Ensembl/VEP_plugins/blob/release/102/dbNSFP.pm <br>
+"spliceai_scores_sorted.hg38.vcf.gz" source: downloaded from https://basespace.illumina.com/s/otSPW8hnhaZR , then sorted by chrom:pos and bgziped/indexed <br>
 
 
