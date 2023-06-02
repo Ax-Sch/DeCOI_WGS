@@ -1,12 +1,12 @@
 # DeCOI_WGS
 
-Pipeline for QC of the DeCOI WGS Samples (~1200). This repository is for documentary purposes.
+Pipeline for QC, GWAS, Gene-based collapsing and rare variant analyis within the DeCOI WGS cohort (1220 individuals). This repository is for documentary purposes.
 
 ## Setup
-This pipeline was run on a compute cluster running CentOS Linux 7, slurm 22.05.6. Miniconda3 was manually installed (https://docs.conda.io/en/latest/miniconda.html).
-The setup is quiet complex, due to the use of the slurm scheduler and the use of Apache Spark. The setup was done roughly in the following way:
+This pipeline was run on a compute cluster running Linux (CentOS Linux 7) and slurm 22.05.6. Miniconda3 was manually installed (https://docs.conda.io/en/latest/miniconda.html).
+The setup is quiet complex, due to the use of the slurm scheduler and the use of Apache Spark. The setup was done in the following way:
 
-Two environments were manually set up: 
+Two conda environments were manually created: 
 - an environment running snakemake-7.3.7:
 ```
 	conda create --name snakemake7 -c bioconda snakemake=7.3.7
@@ -15,10 +15,10 @@ Two environments were manually set up:
 	# you would need to modify it to have e.g. the correct default partition and account. Then you would move it to snakemakes config directory:
 	mkdir -p ~/.config/snakemake/slurm
 	cp config/snakemake_slurm_profile/config.yaml ~/.config/snakemake/slurm
-	# afterwards you can exectute "snakemake --profile slurm"; then each rule that should be executed will be submitted as an individual slurm job. Resource requirements can be specified in each snakemake-rule (see file workflow/Snakefile). 
+	# afterwards you should be able to execute "snakemake --profile slurm"; then each rule that is executed should be submitted as an individual slurm job. Resource requirements can be specified in each snakemake-rule (see file workflow/Snakefile). 
 ```
 - an environment for running hail / Apache Spark:
-Note that this environment is being created to be able to set up a Apache Spark cluster on top of slurm and to run hail within it. This will probably need some debuging. If running hail on a single node is enough, you could simply install hail via conda (e.g. just run the first two commands from below and then run "conda install -c bioconda hail"). You could then set the variable cluster to "no" in config/config.yaml.
+Note that this environment is being created to be able to set up a Apache Spark cluster on top of slurm which can then be used by hail. This will probably need some testing. If running hail on a single node is enough, you could simply install hail via conda (e.g. just run the first two commands from below and then run "conda install -c bioconda hail"). You could then set the variable cluster to "no" in config/config.yaml.
 
 ```
 	conda env update --file env/spark_from_history.yaml
@@ -38,10 +38,14 @@ Note that this environment is being created to be able to set up a Apache Spark 
 ```
 
 Then the pipeline was run by using the file "run.sh"; this file also needs adjustments (as indicated in the file):
+```
 conda activate snakemake7
 sbatch run.sh
-
-You can also test the pipeline e.g. by running snakemake -np
+```
+You can also test the pipeline e.g. by running 
+```
+snakemake -np
+```
 
 Here are the DAGs of some analyses that were conducted - the names of the rules are indicated.
 
