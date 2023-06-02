@@ -1,6 +1,6 @@
 # DeCOI_WGS
 
-Pipeline for QC, GWAS, Gene-based collapsing and rare variant analyis within the DeCOI WGS cohort (1220 individuals). This repository is for documentary purposes.
+Pipeline for QC, GWAS and gene-based collapsing within the DeCOI WGS cohort (1220 individuals). Rules for ROH-analysis and gene-set based analyses are also included. This repository is for documentary purposes and the pipeline will not run out of the box - e.g. adjustments are needed for the local compute environment and not all inpute files (e.g. genotype files, phenotype files, annotation sources) are not provided.
 
 ## Setup
 This pipeline was run on a compute cluster running Linux (CentOS Linux 7) and slurm 22.05.6. Miniconda3 was manually installed (https://docs.conda.io/en/latest/miniconda.html).
@@ -37,14 +37,15 @@ Note that this environment is being created to be able to set up a Apache Spark 
 	
 ```
 
-Then the pipeline was run by using the file "run.sh"; this file also needs adjustments (as indicated in the file):
+The pipeline could now be tested by running 
+```
+conda activate snakemake7
+snakemake -np
+```
+The whole pipeline was executing by using the file "run.sh"; this file would also need adjustments (as indicated in the file):
 ```
 conda activate snakemake7
 sbatch run.sh
-```
-You can also test the pipeline e.g. by running 
-```
-snakemake -np
 ```
 
 Here are the DAGs of some analyses that were conducted - the names of the rules are indicated.
