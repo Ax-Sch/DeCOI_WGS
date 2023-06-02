@@ -41,6 +41,20 @@ Then the pipeline was run by using the file "run.sh"; this file also needs adjus
 conda activate snakemake7
 sbatch run.sh
 
+You can also test the pipeline e.g. by running snakemake -np
+
+Here are the DAGs of some analyses that were conducted:
+
+Population-PCA:
+![PCA Pipeline](dag_PCA.png)
+
+GWAS:
+![GWAS Pipeline](dag_GWAS.png)
+
+RVAS:
+![RVAS Pipeline](dag_RVAS.png)
+
+
 ## Inputs
 Not all input files that were used for the pipeline are included in this repository due to privacy issues or file-size. The following files are missing:
 - genotype data / cohort bcf, which was produced by glnexus. The path ("input_vcf") can be set in the file config/config.yaml.
