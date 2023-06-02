@@ -1,0 +1,9 @@
+name: bcftools_plink_R
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - ensembl-vep==101
+  - bcftools==1.10.2
+  - tabix

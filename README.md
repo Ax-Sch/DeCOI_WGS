@@ -17,7 +17,9 @@ Two environments were manually set up:
 	cp config/snakemake_slurm_profile/config.yaml ~/.config/snakemake/slurm
 	# afterwards you can exectute "snakemake --profile slurm"; then each rule that should be executed will be submitted as an individual slurm job. Resource requirements can be specified in each snakemake-rule (see file workflow/Snakefile). 
 ```
-- an environment for running hail / Apache Spark
+- an environment for running hail / Apache Spark:
+Note that this environment is being created to be able to set up a Apache Spark cluster on top of slurm and to run hail within it. This will probably need some debuging. If running hail on a single node is enough, you could simply install hail via conda (e.g. just run the first two commands from below and then run "conda install -c bioconda hail"). You could then set the variable cluster to "no" in config/config.yaml.
+
 ```
 	conda env update --file env/spark_from_history.yaml
 	conda activate spark
@@ -29,14 +31,21 @@ Two environments were manually set up:
 	cd hail/hail
 	make install-on-cluster HAIL_COMPILE_NATIVES=1 SCALA_VERSION=2.12.13 SPARK_VERSION=3.1.1
 	pip install pyspark==3.1.1
+	
+	# now manually modify the file "workflow/scripts/spark_submit_command.sh" as indicated within the file.
+	# also adjust the last 5 variables within config/config.yaml
+	
 ```
-
-Note that the environment for running hail / Apache Spark is being created to be able to set up a Apache Spark cluster on top of slurm. If you would like to set up a Apache Spark cluster, you would need to mofiy the file "workflow/scripts/spark_submit_command.sh". If running hail on a single node is enough, you could simply install hail via conda and skip the step above; in the file config/config.yaml you could set the variable cluster to "no".
 
 Then the pipeline was run by using the file "run.sh"; this file also needs adjustments (as indicated in the file):
 conda activate snakemake7
 sbatch run.sh
 
 ## Inputs
-This pipeline was run on the joint called cohort bcf, which was produced by glnexus. The path ("input_vcf") can be set in the file config/config.yaml.
+Not all input files that were used for the pipeline are included in this repository due to privacy issues or file-size. The following files are missing:
+- genotype data / cohort bcf, which was produced by glnexus. The path ("input_vcf") can be set in the file config/config.yaml.
+- fasta file of the reference genome (here hg38). The path ("fasta") can be set in the file config/config.yaml.
+- Data of the 1000 genomes project; You only need to provide a folder; there is a snakemake-rule ("download_1000G_genotypes") to download the data. The path ("location_1000G") can be set in the file config/config.yaml.
+- Phenotype files are not included due to privacy issues
+
 

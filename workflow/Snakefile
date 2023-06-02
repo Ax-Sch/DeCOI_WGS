@@ -1,11 +1,13 @@
 configfile: "config/config.yaml"
+
 test_mode=["r","set"]
 tests=["max"] #"skato" "sum",
 PRSs=["PRS","regular"]
 sex_params=["male","female","any"]
 inheritance=["rec","add"]
+filetypes=["anno.file", "aaf.file", "set.list"]
 
-rule test:
+rule all:
 	input:
 		"results/PCA/populations_PCA.html",
 		"results/primaryQC/sampleqc.tsv",
@@ -15,31 +17,41 @@ rule test:
 		"results/primaryQC/missingness.imiss",
 		expand("results/GWAS/EUR_{pheno}.regenie.gz_LOG10P_manhattan.png", pheno=config["phenotypes"]),
 		expand("results/GWAS/EUR_{pheno}_{subpheno}.regenie.gz_LOG10P_manhattan.png", pheno=config["phenotypes"], subpheno=["female","male", "GE60", "LT60","GE60CC", "LT60CC"]),
-		#expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.05_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test="skato", set=test_mode, PRS=PRSs),
 		expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.001_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test="max", set="r", PRS=PRSs),
 		expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.001_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test=["sum","max"], set="set", PRS=PRSs),
 		expand("results/RVAS/TLR7RVAS_EUR_POP_{pheno}_{PRS}/{rec}_{sex}_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"],rec=inheritance, PRS=PRSs, sex=sex_params),
 		expand("results/RVAS/TLR7PlinkFisher/{sex}_{pheno}.model", pheno=config["phenotypes"], sex=sex_params),
 		expand("results/RVAS/TLR7PlinkFisher/{sex}_{pheno}_cases.frqx", pheno=config["phenotypes"], sex=sex_params),
-		#expand("results/RVAS/plink_{set}RVAS/EUR_POP_{pheno}_{AF}_{pheno}.modelQQ.pdf", pheno=config["phenotypes"], AF=config["af_cutoffs"], set=test_mode),
 		"results/kinship/king.kin0",
 		"results/GWAS/EUR:45859597_B1.regenie.gz",
-		#"results/GWAS/EUR:45859597_B1.regenie.gz_LOG10P_manhattan.png",
 		expand("results/GWAS/EUR:45859597_B1_{subpheno}.regenie.gz_LOG10P_manhattan.png", subpheno=["female","male", "GE60", "LT60"]),
-		#"results/PRS/scores.profile",
+		"results/PRS/scores.profile",
+		"results/array_comparison/array_comp.con",
+		expand("results/filtering/annotated_split_vep_{contig}.tsv", contig=config["contigs"]),
+		expand("results/for_RVAS/{contig}.anno.file.txt", contig=config["contigs"]),
+		expand("results/for_RVAS/all_contigs_{filetype}.txt", filetype=filetypes),
+		config["database_dir"]+"/gnomad.genomes.v3.1.2.sites.all_red.vcf.gz",
+		expand("results/vep/annotated_{contig}.vcf.gz", contig=config["contigs"]),
+		expand("results/maf_comp/afs_{contig}.tsv.gz", contig=config["contigs"]),
+		"results/bedfilesForPrefilter/ExonsClinVarSpliceAI.bed",
+		expand("results/ROH/Plink/ROHAnalysis_ROH_{maf}_{pheno}.hom", maf=[0.01, 0], pheno=config["phenotypes"]),
+		expand("results/ROH/Plink/INBAnalysis_ROH_{maf}_{pheno}.het.gz", maf=[0.01, 0], pheno=config["phenotypes"]),
+		#expand("results/RVAS/{set}RVAS_{test}_EUR_POP_{pheno}_{PRS}/0.05_{pheno}.regenie.gzQQ.pdf", pheno=config["phenotypes"], test="skato", set=test_mode, PRS=PRSs),
+		#expand("results/RVAS/plink_{set}RVAS/EUR_POP_{pheno}_{AF}_{pheno}.modelQQ.pdf", pheno=config["phenotypes"], AF=config["af_cutoffs"], set=test_mode),
+		#"results/GWAS/EUR:45859597_B1.regenie.gz_LOG10P_manhattan.png",
 		#"results/genomeScan/genomeScanEUR_A1G.fam",
 		#"results/rvtests/results_Fisher/EUR_POP_A1/M3_0.01.CMCFisherExact.assoc",
 		#"results/rvtests/results_SKAT_regional/EUR_POP_A1/M3_0.01.Skat.assoc",
-		"results/array_comparison/array_comp.con",
+
 
 
 
 # START # GENERAL QC ############################################################################################################################################
 
 # normalize the vcf file and annotate it with the ID: CHROM:POS:REF:ALT
-rule normalize_vcf_annotate_bcftools:
+rule NormalizeBCF:
 	input:
-		bcf=config["input_vcf"],
+		bcf=config["input_bcf"],
 		fasta=config["fasta"]
 	output:
 		vcf_gz="results/normalized/df3_norm.vcf.gz",
@@ -92,7 +104,7 @@ rule ConvertToHail:
 		fi
 		"""
 
-rule primaryQC:
+rule PrimaryQC:
 	input:
 		mt="results/normalized/hail_MT",
 	output:		
@@ -206,7 +218,7 @@ rule MakeVarSets:
 		"""
 
 
-rule regions_prune:
+rule LDRegionsPrune:
 	input:
 		in_plink="results/var_sets/for_QC/common.fam",
 		bed="resources/regions_of_high_LD_GRCh38.bed",
@@ -246,7 +258,7 @@ rule regions_prune:
 		"""
 
 
-rule impute_sex:
+rule ImputeSex:
 	input:
 		fam="results/var_sets/for_QC/common_pruned.fam",
 		bim="results/var_sets/for_QC/common_pruned.bim",
@@ -281,7 +293,7 @@ rule impute_sex:
 
 		"""
 
-rule plot_imputed_sex:
+rule PlotImputedSex:
 	input:
 		"results/primaryQC/sexcheck.sexcheck",
 	output:		
@@ -293,7 +305,7 @@ rule plot_imputed_sex:
 	script: "scripts/plotFcheckSex.R"
 
 
-rule get_missingness:
+rule GetMissingness:
 	input:
 		fam="results/var_sets/for_QC/common_pruned.fam",
 		bim="results/var_sets/for_QC/common_pruned.bim",
@@ -320,7 +332,7 @@ rule get_missingness:
 
 #### Population PCA W 1000G project
 
-rule download_1000G_sample_info:
+rule Download_1000G_SampleInfo:
 	output:
 		#"GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
 		"results/PCA/20130606_g1k.ped" # contig = chr1, ...
@@ -339,7 +351,7 @@ rule download_1000G_sample_info:
 		#gzip -d GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz
 		"""
 
-rule download_1000G_genotypes:
+rule Download_1000G_Genotypes:
 	output:
 		config["location_1000G"]+"ALL.chr{contig}.shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz",
 		config["location_1000G"]+"ALL.chr{contig}.shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz.tbi"#
@@ -357,7 +369,7 @@ rule download_1000G_genotypes:
 		"""
 
 
-rule prepare_1000G_for_ancestry_PCA:
+rule Prep_1000G_ForAncestryPCA:
 	input:
 		vcf=config["location_1000G"]+"ALL.chr{contig}.shapeit2_integrated_v1a.GRCh38.20181129.phased.vcf.gz",
 		fasta=config["fasta"], #/ceph01/projects/bioinformatics_resources/Genomes/Human/GATK/hg38/Homo_sapiens_assembly38.fasta
@@ -399,7 +411,7 @@ rule prepare_1000G_for_ancestry_PCA:
 		--out {params.bed2}
 		"""
 		
-rule merge_data_w_1000G_run_PCA:
+rule Merge_GTs_W_1000G_DoPCA:
 	input:
 		_1000G_data=expand("results/1000G/1000G_chr{contig}_pruned.bed", contig=config["contigs_wo_X"]), #### !!!!! 
 		hailbim="results/var_sets/for_QC/common_pruned.bim",
@@ -442,7 +454,7 @@ rule merge_data_w_1000G_run_PCA:
 		"""
 
 
-rule analyse_PCA_results:
+rule AnalysePCAResults:
 	input:
 		"results/PCA/MergeFullForPCA.eigenvec",
 		"results/PCA/20130606_g1k.ped",
@@ -462,7 +474,7 @@ rule analyse_PCA_results:
 		Rscript -e 'library(rmarkdown); rmarkdown::render("populations_PCA.R", "html_document")'
 		"""
 
-rule kinship_analysis:
+rule KinshipAnalysis:
 	input:
 		fam="results/var_sets/for_QC/common_pruned.fam",
 	output:
@@ -484,12 +496,12 @@ rule kinship_analysis:
 
 
 
-rule selectSubsets:
+rule SelectSubcohort:
 	input:
 		fam="results/var_sets/{set}.fam",
 		bim="results/var_sets/{set}.bim",
 		bed="results/var_sets/{set}.bed",
-		list="resources/{subset}.tsv",
+		list="resources/.no_upload/{subset}.tsv",
 	output:
 		fam="results/var_sets/{subset}/{set}.fam",
 		bim="results/var_sets/{subset}/{set}.bim",
@@ -524,7 +536,7 @@ rule selectSubsets:
 # START # PHENO COVAR FILES #############################################################################################################################################
 
 
-rule generate_pheno_files_for_GWAS:
+rule MakePhenoFileForGWAS:
 	input:
 		fam="results/var_sets/EURs_unrel/{set}.fam",
 		bim="results/var_sets/EURs_unrel/{set}.bim",
@@ -554,7 +566,7 @@ rule generate_pheno_files_for_GWAS:
 		"""
 
 
-rule additional_GWAS_Specifc_QC:
+rule AdditionalGWAS_SpecifcQC:
 	input:
 		fam="results/var_sets/EURs_unrel/{pheno}/common.fam",
 		bim="results/var_sets/EURs_unrel/{pheno}/common.bim",
@@ -625,7 +637,7 @@ rule additional_GWAS_Specifc_QC:
 
 
 
-rule generate_PCA_covar_for_GWAS:
+rule MakePCA_CovarForGWAS:
 	input:
 		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
 		bim="results/var_sets/EURs_unrel/{pheno}/commonAdQC.bim",
@@ -666,7 +678,7 @@ rule generate_PCA_covar_for_GWAS:
 		"""
 
 
-rule generate_covar_files_GWAS:
+rule MakeCovarFilesGWAS:
 	input:
 		PCA_cov="results/var_sets/EURs_unrel/{pheno}/commonAdQC.eigenvec",
 		individual_list="resources/.no_upload/EURs_unrel.tsv"
@@ -704,7 +716,7 @@ rule CompilePhenoInfo:
 
 
 
-rule Regenie_step2_GWAS:
+rule RegenieStep2GWAS:
 	input:
 		cov="results/var_sets/EURs_unrel/{pheno}/cov.cov",
 		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
@@ -748,7 +760,7 @@ rule Regenie_step2_GWAS:
 		  """
 
 
-rule Regenie_step2_GWAS_conditional:
+rule RegenieStep2GWAS_Conditional:
 	input:
 		cov="results/var_sets/EURs_unrel/{pheno}/cov.cov",
 		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
@@ -791,7 +803,7 @@ rule Regenie_step2_GWAS_conditional:
 		  --gz
 		  """
 
-rule plink2_GWAS:
+rule Plink2GWAS:
 	input:
 		cov="results/var_sets/EURs_unrel/{pheno}/cov.cov",
 		fam="results/var_sets/EURs_unrel/{pheno}/commonAdQC.fam",
@@ -818,7 +830,7 @@ rule plink2_GWAS:
 		  """
 
 
-rule generate_qq_plots:
+rule GenerateQQ_Plots:
 	input:
 		path_reg="results/GWAS/{infile}"
 	output:
@@ -838,7 +850,7 @@ rule generate_qq_plots:
 
 # START # RVAS #############################################################################################################################################
 
-rule add_PRS_to_COV:
+rule AddPRS_ToCovariates:
 	input:
 		"results/var_sets/EURs_unrel/{pheno}/cov.cov",
 		"results/PRS/scores.profile"
@@ -854,12 +866,12 @@ rule add_PRS_to_COV:
 
 
 
-rule gene_sets:
+rule MakeGeneSetFilesRegenie:
 	input:
 		"resources/gene_sets.tsv",
 		"resources/genomic_ranges.bed",
 		"results/RVAS/data.anno.aaf.file.txt",
-		config["annotations_dir"]+"all_contigs_anno.file.txt",
+		"results/for_RVAS/all_contigs_anno.file.txt",
 		"results/var_sets/EURs_unrel/general.bim",
 	output:
 		"results/RVAS/set.annos.tsv",
@@ -875,7 +887,7 @@ rule gene_sets:
 	script:
 		"scripts/gene_sets.R"
 
-rule allVarsOneChrom:
+rule AllGeneSetVarsOnArtificialChrom:
 	input:
 		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
 		bed="results/var_sets/EURs_unrel/{pheno}/general.bed",
@@ -903,7 +915,7 @@ rule allVarsOneChrom:
 		"""
 
 
-rule prefilter:
+rule PrefilterPlinkForAF:
 	input:
 		fam="{plink}.fam",
 		bed="{plink}.bed",
@@ -932,15 +944,15 @@ rule prefilter:
 		"""
 
 
-rule Regenie_step2_RVAS_SUM_SKAT:
+rule RegenieStep2_RVAS_SUM_SKAT:
 	input:
 		cov=lambda wildcards: "results/var_sets/EURs_unrel/{pheno}/cov_PRS.cov" if (wildcards["PRS"]=="PRS") else "results/var_sets/EURs_unrel/{pheno}/cov.cov",
 		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
 		mask_def="resources/mask_definition.mask", #lambda wildcards: "resources/mask_definition.mask" if (wildcards["set"]=="r") else "resources/mask_definitionRegional.mask",
 		plink_file=lambda wildcards: "results/var_sets/EURs_unrel/{pheno}/general_{AF}.bed" if (wildcards["set"]=="r") else "results/var_sets/EURs_unrel/{pheno}/general_oneChr_{AF}.bed",
-		anno_csq=lambda wildcards: config["annotations_dir"]+"all_contigs_anno.file.txt" if (wildcards["set"]=="r") else "results/RVAS/set.annos.tsv",
+		anno_csq=lambda wildcards: "results/for_RVAS/all_contigs_anno.file.txt" if (wildcards["set"]=="r") else "results/RVAS/set.annos.tsv",
                 anno_aaf=lambda wildcards: "results/RVAS/data.anno.aaf.file.txt" if (wildcards["set"]=="r") else "results/RVAS/set.aaf.tsv",
-		var_sets=lambda wildcards: config["annotations_dir"]+"all_contigs_set.list.txt" if (wildcards["set"]=="r") else "results/RVAS/set.sets.tsv",
+		var_sets=lambda wildcards: "results/for_RVAS/all_contigs_set.list.txt" if (wildcards["set"]=="r") else "results/RVAS/set.sets.tsv",
 	output:
 		path_reg="results/RVAS/{set}RVAS_{test}_{population}_POP_{pheno}_{PRS}/{AF}_{pheno}.regenie.gz",
 	resources: cpus=1, mem_mb=72000, time_job=2880
@@ -984,7 +996,7 @@ rule Regenie_step2_RVAS_SUM_SKAT:
 
 
 
-rule plink_fisher:
+rule PlinkFisher:
 	input:
 		mask_bed="results/RVAS/{set}RVAS_{population}_POP_{pheno}_{AF}_masks.bed",
 		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
@@ -1007,7 +1019,7 @@ rule plink_fisher:
 		--out {params.plink_out}
 		"""
 
-rule qq_plots_RVAS:
+rule QQ_PlotsRVAS:
 	input:
 		"{prefix}",
 		"resources/ENSG_to_name.txt"
@@ -1028,7 +1040,7 @@ rule qq_plots_RVAS:
 # START # PRS #############################################################################################################################################
 
 
-rule calculate_PRS:
+rule CalculateIndividualPRS:
 	input:
 		famCommon="results/var_sets/common.fam",
 		bimCommon="results/var_sets/common.bim",
@@ -1057,7 +1069,7 @@ rule calculate_PRS:
 
 # START # TLR7 ##########################################################################################################################################
 
-rule filter_TLR7_region:
+rule FilterTLR7_Region:
 	input:
 		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
 		bim="results/var_sets/EURs_unrel/{pheno}/general.bim",
@@ -1085,7 +1097,7 @@ rule filter_TLR7_region:
 		"""
 
 
-rule Regenie_step2_TLR7:
+rule RegenieStep2_TLR7:
 	input:
 		cov=lambda wildcards: "results/var_sets/EURs_unrel/{pheno}/cov_PRS.cov" if (wildcards["PRS"]=="PRS") else "results/var_sets/EURs_unrel/{pheno}/cov.cov",
 		pheno="results/var_sets/EURs_unrel/{pheno}/common.pheno",
@@ -1153,7 +1165,7 @@ rule TLR7PlinkFisher:
 		--out {params.plink_out}
 		"""
 
-rule TLR7Plinkcounts:
+rule TLR7PlinkCounts:
 	input:
 		fam="results/var_sets/EURs_unrel/{pheno}/generalTLR7.fam",
 		bim="results/var_sets/EURs_unrel/{pheno}/generalTLR7.bim",
@@ -1197,44 +1209,451 @@ rule TLR7Plinkcounts:
 # START # ROH #############################################################################################################################################
 
 
-rule Extract_Rohs_plink:
+rule ROH_Plink:
 	input:
-		fam="results/CommonVars/CommonVars.fam",
+		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
+		bed="results/var_sets/EURs_unrel/{pheno}/general.bed",
+		bim="results/var_sets/EURs_unrel/{pheno}/general.bim",
 	output:
-		ROH_file=multiext("results/ROH/bedForROHAnalysis_ROH", ".hom", ".hom.indiv", ".hom.summary", ".log")
-	resources: cpus=12, mem_mb=48000, time_job=720, additional=" --gres localtmp:200G --ntasks=1 -x " + config["master_nodes_excluded"]
+		ROH_file=multiext("results/ROH/Plink/ROHAnalysis_ROH_{maf}_{pheno}", ".hom", ".hom.indiv", ".hom.summary", ".log")
+	conda: "envs/bcftools_plink_R.yaml"
+	resources: cpus=4, mem_mb=80000, time_job=2000
 	params:
 		partition=config["medium"],
-		plink_in=lambda wildcards, input: input["fam"][:-4],
-		ROH_out="results/ROH/bedForROHAnalysis_ROH",
-	conda: "spark"
+		ROH_out="results/ROH/Plink/ROHAnalysis_ROH_{maf}_{pheno}",
+		maf=lambda wildcards: "" if wildcards["maf"] == "0" else "--maf "+ wildcards["maf"],
 	shell:
 		"""
-		plink --bfile {params.plink_in} --out {params.ROH_out} --homozyg
+		plink \
+		--fam {input.fam} \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		{params.maf} \
+		--homozyg \
+		--out {params.ROH_out}
 		"""
 
-rule Extract_Rohs_bcftools:
+rule InbreedingPlink:
 	input:
-		vcf_for_GWAS="results/CommonVars/CommonVars.vcf.bgz",
-	output:		
-		ROH_file="results/ROH/test_roh.tsv.gz",
-	resources: cpus=6, mem_mb=24000, time_job=720, additional=" "
+		fam="results/var_sets/EURs_unrel/{pheno}/general.fam",
+		bed="results/var_sets/EURs_unrel/{pheno}/general.bed",
+		bim="results/var_sets/EURs_unrel/{pheno}/general.bim",
+	output:
+		ROH_file="results/ROH/Plink/INBAnalysis_ROH_{maf}_{pheno}.het.gz"
+	conda: "envs/Plink.yaml"
+	resources: cpus=4, mem_mb=80000, time_job=2000
 	params:
 		partition=config["medium"],
-		out_dir="results/ROH/",
-	conda: "spark"
+		ROH_out=lambda wildcards, output: output["ROH_file"][:-7],
 	shell:
 		"""
-		mkdir -p {params.out_dir}
-
-
-		# the code here could e.g. look like this:
-		bcftools roh {input.vcf_for_GWAS} --AF-tag AF -G30 --threads 6 | \
-		 gzip > {output.ROH_file}
+		plink \
+		--fam {input.fam} \
+		--bed {input.bed} \
+		--bim {input.bim} \
+		--het gz \
+		--ibc \
+		--out {params.ROH_out}
 		"""
+
 
 # END # ROH #############################################################################################################################################
 
+
+# START # ANNOTATION ####################################################################################################################################
+
+
+rule DownloadGnomAD:
+	output:
+		config["database_dir"]+"/gnomad.genomes.v3.1.2.sites.chr{contig}.vcf.bgz"
+	params: 
+		partition=config["long"],
+		out_folder=config["database_dir"]
+	resources: cpus=1, mem_mb=4000, time_job=10000
+	shell: 
+		"""
+		cd {params.out_folder}
+		wget https://storage.googleapis.com/gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr{wildcards.contig}.vcf.bgz
+		wget https://storage.googleapis.com/gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.sites.chr{wildcards.contig}.vcf.bgz.tbi
+		"""
+
+rule DownloadCADD:
+	output:
+		config["database_dir"]+"/whole_genome_SNVs.tsv.gz"
+	params: 
+		partition=config["long"],
+		out_dir=config["database_dir"]
+	resources: cpus=1, mem_mb=10, time_job=10000
+	shell:
+		"""
+		cd {params.out_dir}
+		wget https://kircherlab.bihealth.org/download/CADD/v1.6/GRCh38/whole_genome_SNVs.tsv.gz
+		wget https://kircherlab.bihealth.org/download/CADD/v1.6/GRCh38/whole_genome_SNVs.tsv.gz.tbi
+		wget https://kircherlab.bihealth.org/download/CADD/v1.6/GRCh38/gnomad.genomes.r3.0.snv.tsv.gz
+		wget https://kircherlab.bihealth.org/download/CADD/v1.6/GRCh38/gnomad.genomes.r3.0.snv.tsv.gz.tbi
+		"""
+
+
+
+rule ReduceGnomAD:
+	input:
+		config["database_dir"]+"/gnomad.genomes.v3.1.2.sites.chr{contig}.vcf.bgz"
+	output:
+		config["database_dir"]+"/gnomad.genomes.v3.1.2.sites.chr{contig}_red.vcf.gz"
+	params: partition=config["long"]
+	resources: cpus=1, mem_mb=4000, time_job=10000
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+
+	shell:
+		"""
+		keep_string="^INFO/AC,INFO/AN,INFO/AF,INFO/popmax,INFO/faf95_popmax,INFO/AC_oth,INFO/AN_oth,INFO/AF_oth,INFO/nhomalt_oth,INFO/AC_ami,INFO/AN_ami,INFO/AF_ami,INFO/nhomalt_ami,INFO/AC_sas,INFO/AN_sas,INFO/AF_sas,INFO/nhomalt_sas,INFO/AC_fin,INFO/AN_fin,INFO/AF_fin,INFO/nhomalt_fin,INFO/AC_eas,INFO/AN_eas,INFO/AF_eas,INFO/nhomalt_eas,INFO/AC_amr,INFO/AN_amr,INFO/AF_amr,INFO/nhomalt_amr,INFO/AC_afr,INFO/AN_afr,INFO/AF_afr,INFO/nhomalt_afr,INFO/AC_raw,INFO/AN_raw,INFO/AF_raw,INFO/nhomalt_raw,INFO/AC_mid,INFO/AN_mid,INFO/AF_mid,INFO/nhomalt_mid,INFO/nhomalt,INFO/AC_asj,INFO/AN_asj,INFO/AF_asj,INFO/nhomalt_asj,INFO/AC_nfe,INFO/AN_nfe,INFO/AF_nfe,INFO/nhomalt_nfe,INFO/AC_popmax,INFO/AN_popmax,INFO/AF_popmax,INFO/nhomalt_popmax"
+		bcftools annotate -x "$keep_string" {input} -Oz -o {output}
+		
+		tabix -pvcf {output}
+		#rm {input}
+		"""
+
+rule CombineGnomAD_Contigs:
+	input:
+		expand(config["database_dir"]+"/gnomad.genomes.v3.1.2.sites.chr{contig}_red.vcf.gz", contig=config["contigs"])
+	output:
+		reduced=config["database_dir"]+"/gnomad.genomes.v3.1.2.sites.all_red.vcf.gz",
+		#above_one_perc=config["database_dir"]+"/gnomad.genomes.v3.1.1.sites.all_red_more_freq_than_percent.vcf.gz"
+	params: partition=config["medium"]
+	resources: cpus=1, mem_mb=4000, time_job=720
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	shell:
+		"""
+		bcftools concat -Oz {input} > {output.reduced}
+		tabix -pvcf {output.reduced}
+		#bcftools view ouptut.reduced -i "INFO/AF>0.01" -Oz -o output.above_one_perc
+		#tabix -pvcf output.above_one_perc
+		"""
+
+
+rule GetBedOfRelevantRegions:
+	input:
+		DHS="resources/DHS_Index_and_Vocabulary_hg38_WM20190703.core.bed.gz",
+		GenRa="resources/genomic_ranges.bed",
+	output:
+		"results/bedfilesForPrefilter/ExonsClinVarSpliceAI.bed"
+	params: partition=config["medium"],
+		out_folder="results/bedfilesForPrefilter",
+		anno_sources=config["database_dir"],
+	resources: cpus=1, mem_mb=9000, time_job=720
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	shell:
+		"""
+		# software required: bedops, bedtools
+		mkdir -p {params.out_folder}
+		cd {params.out_folder}
+
+		# get bedtools reference file
+		wget -Nc https://raw.githubusercontent.com/arq5x/bedtools2/master/genomes/human.hg38.genome -O bedtools_hg38_ref_file.genome
+
+		# GENCODE
+		wget -Nc ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_35/gencode.v35.annotation.gff3.gz
+
+		# exons
+		zcat gencode.v35.annotation.gff3.gz | \
+		 awk '$3 == "exon"' - | \
+		 sort -k1,1 -k4,4n -V | \
+		 bedtools merge -i stdin | \
+		 cut -f1-3 | gzip > gencode35Exons.bed.gz
+
+		# add padding to gencode file
+		bedtools slop -b 20 \
+		-i gencode35Exons.bed.gz \
+		-g bedtools_hg38_ref_file.genome | \
+		gzip > gencode35ExonsPadded.bed.gz
+
+		# promoters
+		zcat gencode.v35.annotation.gff3.gz | \
+		grep -P "transcript\t" | grep -P "\t\+\t" | \
+		 awk '{{OFS="\t"}}{{print $1,$4-1001,$4-1}}' > plus_strand_promotor.bed
+		
+		zcat gencode.v35.annotation.gff3.gz | \
+		grep -P "transcript\t" | grep -P "\t\-\t" | \
+		awk '{{OFS="\t"}}{{print $1,$5-1,$5+999}}' > minus_strand_promotor.bed
+
+		cat plus_strand_promotor.bed minus_strand_promotor.bed | \
+		sort -k1,1 -k3,3n -V | \
+		awk '{{OFS="\t"}}{{if ($2<0) print $1,"0",$3; else print $0}}' | \
+		gzip > promoters.bed.gz
+		
+
+		# ClinVar
+		wget -Nc ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz
+		zcat clinvar.vcf.gz | grep "^#"  > clinvar_pathogenic.vcf
+		zcat clinvar.vcf.gz | grep -v "^#" | egrep "pathogenic|Pathogenic" | grep -v "uncertain" >> clinvar_pathogenic.vcf
+		bedtools merge -i clinvar_pathogenic.vcf | cut -f1-3 | awk '{{OFS=""}}{{print "chr",$0}}' | gzip > clinvar_pathogenic.bed.gz
+
+		# SpliceAI
+		# filter splice AI for scores >0.5 and convert to BED
+		zcat {params.anno_sources}'/spliceai_scores_sorted.hg38.vcf.gz' | \
+		egrep "0\.[5-9]|1\.0" | \
+		awk 'BEGIN {{OFS="\t"}} {{ print $1, $2-1, $2 }}' | \
+		gzip > \
+		splice_ai_positions.bed.gz
+
+
+		# merge and sort individual bed files
+		zcat gencode35ExonsPadded.bed.gz clinvar_pathogenic.bed.gz splice_ai_positions.bed.gz promoters.bed.gz ../../{input.DHS} | \
+		cat - ../../{input.GenRa} | \
+		cut -f1-3 | \
+		bedtools sort | \
+		bedtools merge > "ExonsClinVarSpliceAI.bed"
+		"""
+
+
+
+rule PrefilterBcf_w_Bed:
+	input:
+		bcf=config["input_bcf"],
+		bedfile="results/bedfilesForPrefilter/ExonsClinVarSpliceAI.bed"
+	output:
+		vcf_prefiltered="results/prefilter/all_samples_genome_prefiltered_{contig}.vcf.gz",
+		relevant_bed="results/prefilter/bed_{contig}.bed"
+	params:
+		partition="long"
+	resources: cpus=1, mem_mb=4000, time_job=7200, additional=""
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	shell:
+		"""
+		cat {input.bedfile} | grep "^chr{wildcards.contig}	" > {output.relevant_bed}
+		
+		bcftools view {input} -R {output.relevant_bed} -Ob | \
+		bcftools sort -T $TMPDIR | \
+		bcftools norm -m-any -Ob | \
+		bcftools norm --remove-duplicates -Oz -o {output.vcf_prefiltered}
+		"""
+
+rule VEP_Annotation:
+	input:
+		vcf="results/prefilter/all_samples_genome_prefiltered_{contig}.vcf.gz",
+		DHS="resources/DHS_Index_and_Vocabulary_hg38_WM20190703.core.bed.gz",
+	output:
+		"results/vep/annotated_{contig}.vcf.gz"
+	params:
+		partition=config["long"],
+		anno_sources=config["database_dir"],
+		buffer=2000
+	conda:
+		"envs/vep_101.yaml"
+	resources: cpus=4, mem_mb=50000, time_job=10040, additional=" "
+	shell:
+		"""
+
+		work_dir=$(pwd)
+		database_dir={params.anno_sources}
+		
+		echo $SLURM_NODELIST			
+		echo $TMPDIR
+		
+		cd $TMPDIR
+		#git clone https://github.com/ImperialCardioGenetics/UTRannotator.git
+		#export PERL5LIB=$(pwd)/UTRannotator
+		cp -v $database_dir'/Homo_sapiens_assembly38.fasta.bgz'* . #/dev/shm/ #1G, store to RAMdisk
+		cp -v $database_dir'/gnomad.genomes.v3.1.2.sites.all_red.vcf.gz'* . # 9G
+		#cp -v $database_dir'/gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.bgz'* . # 86 G biggest file, do not copy
+		mkdir -p dbNSFP41
+		cp -v $database_dir'/dbNSFP41/dbNSFP4.1a_hg38.gz'* dbNSFP41/ #31G
+		cp -v $database_dir'/dbNSFP41/dbNSFP4.1a.readme.txt' dbNSFP41/
+		cp -v $database_dir'/spliceai_scores_sorted.hg38.vcf.gz'* . #0,6G
+		cp -v $database_dir'/cnv_database_171_samples.vcf.gz'* .
+		#cp -v $database_dir'/whole_genome_SNVs.tsv.gz'* . # copy CADD 81G
+		#cp -v $database_dir'/gnomad.genomes.r3.0.snv.tsv.gz'* . # copy CADD 6G
+		cp -rv $database_dir'/homo_sapiens' . # 15G
+		wget -N ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz  
+		wget -N ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz.tbi	
+		
+		cd $work_dir
+		
+		#export PERL5LIB=$database_dir'/UTRannotator/'
+		#wget https://raw.githubusercontent.com/Ensembl/VEP_plugins/postreleasefix/101/TSSDistance.pm
+		export PERL5LIB=$database_dir
+
+		vep -v  \
+		--cache \
+		--offline \
+		--force_overwrite \
+		--fork 8 \
+		--buffer {params.buffer} \
+		--hgvs \
+		--no_stats \
+		--format vcf \
+		--numbers \
+		--nearest gene \
+		--vcf \
+		--distance 50000,1000 \
+		--gene_phenotype \
+		--pick_allele_gene \
+		--af \
+		--af_esp \
+		--check_existing \
+		-a GRCh38 \
+		--dir_cache $TMPDIR \
+		--fasta $TMPDIR'/Homo_sapiens_assembly38.fasta.bgz' \
+		--custom $TMPDIR'/clinvar.vcf.gz',ClinVar,vcf,exact,0,CLNSIG,CLNREVSTAT,CLNDN \
+		--custom $TMPDIR'/gnomad.genomes.v3.1.2.sites.all_red.vcf.gz',gnomAD_ge,vcf,exact,0,AF,AC,AN,nhomalt,popmax,AF_oth,AF_ami,AF_sas,AF_fin,AF_eas,AF_amr,AF_afr,nhomalt_afr,AF_raw,AF_mid,AF_asj,AF_nfe,AF_popmax \
+		--custom $database_dir'/gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.bgz',gnomAD_ex,vcf,exact,0,AF,AN,AC,AF_afr,AF_amr,AF_asj,AF_eas,AF_fin,AF_nfe,AF_oth,AF_sas,nhomalt \
+		--plugin dbNSFP,$TMPDIR'/dbNSFP41/dbNSFP4.1a_hg38.gz',Ensembl_proteinid,MutationTaster_pred,MutationTaster_score,LRT_pred,Polyphen2_HDIV_pred,Polyphen2_HVAR_pred,SIFT_pred,REVEL_score,REVEL_rankscore,phyloP100way_vertebrate,phyloP100way_vertebrate_rankscore,phastCons100way_vertebrate,phastCons100way_vertebrate_rankscore,BayesDel_noAF_score,BayesDel_noAF_pred \
+		--plugin CADD,$database_dir'/whole_genome_SNVs.tsv.gz',$database_dir'/gnomad.genomes.r3.0.snv.tsv.gz' \
+		--custom $TMPDIR'/spliceai_scores_sorted.hg38.vcf.gz',SpliceAI,vcf,exact,0,ALLELE,SYMBOL,DS_AG,DS_AL,DS_DG,DS_DL  \
+		--custom {input.DHS},DHS,bed,exact,0 \
+		--plugin StructuralVariantOverlap,file=$TMPDIR'/cnv_database_171_samples.vcf.gz' \
+		--plugin TSSDistance \
+		-i {input.vcf} \
+		-o stdout | bgzip > {output}
+		
+		#--plugin UTRannotator,$TMPDIR'/UTRannotator/uORF_starts_ends_GRCh38_PUBLIC.txt' \
+		#--custom $TMPDIR'/gnomad.exomes.r2.1.1.sites.liftover_grch38.vcf.bgz',gnomAD_ex,vcf,exact,0,AF,AN,AC,AF_afr,AF_amr,AF_asj,AF_eas,AF_fin,AF_nfe,AF_oth,AF_sas,nhomalt \
+		
+		#rm /dev/shm/Homo_sapiens_assembly38.fasta.bgz*
+		
+		"""
+
+
+rule PrefilterVEP_ForManualAnalysis:
+	input:
+		"results/vep/annotated_{contig}.vcf.gz"
+	output:
+		"results/filtering/annotated_split_vep_{contig}.vcf.gz"
+	params:
+		partition=config["long"],
+		vep_filtered="results/filtering/annotated_filtered_{contig}.vcf",
+		vep_renamed="results/filtering/annotated_filtered_renamed_{contig}.vcf",
+		anno_sources=config["database_dir"],
+	conda:
+		"envs/vep_101.yaml"
+	resources: cpus=1, mem_mb=9000, time_job=10040
+	shell:
+		"""
+		function return_AF_string_w_genomes
+		{{
+		echo "((gnomAD_ge_AF < "$1" or not gnomAD_ge_AF) and ((IMPACT is HIGH) or (IMPACT is MODERATE) or (IMPACT is LOW) or (SpliceAI_SYMBOL)) and (gnomAD_ge_nhomalt < 11 or not gnomAD_ge_nhomalt)) or (ClinVar_CLNSIG and not (ClinVar_CLNSIG match benign or ClinVar_CLNSIG match Benign)) or (CLIN_SIG match pathogenic or CLIN_SIG match Pathogenic)"
+		
+		#echo "((gnomAD_ge_AF_AFR < "$1" or not gnomAD_ge_AF_AFR) and (gnomAD_ge_AF_AMR < "$1" or not gnomAD_ge_AF_AMR) and (gnomAD_ge_AF_EAS < "$1" or not gnomAD_ge_AF_EAS) and (gnomAD_ge_AF_FIN < "$1" or not gnomAD_ge_AF_FIN) and (gnomAD_ge_AF_NFE < "$1" or not gnomAD_ge_AF_NFE) and (gnomAD_ge_AF_SAS < "$1" or not gnomAD_ge_AF_SAS) and (AA_AF < "$1" or not AA_AF) and (EA_AF < "$1" or not EA_AF) and ((IMPACT is HIGH) or (IMPACT is MODERATE) or (IMPACT is LOW) or (SpliceAI_SYMBOL)) and (gnomAD_ex_nhomalt < 5 or not gnomAD_ex_nhomalt)) or (ClinVar_CLNSIG and not (ClinVar_CLNSIG match benign or ClinVar_CLNSIG match Benign)) or (CLIN_SIG match pathogenic or CLIN_SIG match Pathogenic)"
+		}}
+		
+		filter_vep_str="$(return_AF_string_w_genomes 0.02)"
+		echo "bcftools +fill-tags {input} -- -t AN,AC | filter_vep --format vcf --force_overwrite --filter \\""$filter_vep_str"\\" | bgzip > {output}" | bash
+		"""
+
+
+
+rule PrefilteredVEP_ToTSV:
+	input:
+		"results/filtering/annotated_split_vep_{contig}.vcf.gz"
+	output:
+		"results/filtering/annotated_split_vep_{contig}.tsv"
+	params:
+		partition=config["long"],
+		vep_renamed="results/filtering/annotated_filtered_renamed_{contig}.vcf.gz",
+		anno_sources=config["database_dir"],
+	conda:
+		"envs/vep_101.yaml"
+	resources: cpus=1, mem_mb=9000, time_job=10040
+	shell:
+		"""
+		
+		zcat {input} | sed 's:;AN=:;AN_cohort=:g' | \
+		sed 's:ID=AN,:ID=AN_cohort,:g' | \
+		sed 's:;AC=:;AC_cohort=:g' | \
+		sed 's:ID=AC,:ID=AC_cohort,:g' | \
+		sed 's:||:|0|:g'| sed 's:||:|0|:g' | bgzip > {params.vep_renamed}
+		
+		split_string1='%CHROM\\t%POS\\t%ID\\t%REF\\t%ALT\\t%QUAL\\t%AC_cohort\\t%AN_cohort\\t'
+		split_string2='%CSQ\\t'
+		split_string3='[%GT\\t%TGT\\t%AD\\t%GQ\\t]' # 
+
+		header1=$(echo $split_string1 | sed 's:\\\\t:	:g')
+		header2=$(bcftools +split-vep {params.vep_renamed} -l -l | cut -f2 | tr "\\n" "\\t")
+		header3=$(bcftools query -u -H -f $split_string3'\\n' {params.vep_renamed} | head -n1 | cut -f2-5) ||  echo ""
+		echo "sample	${{header1}}	$header2	$header3" | awk -v OFS="\\t" '$1=$1'  > {output}
+		for sample in `bcftools query -l {params.vep_renamed}`; do
+			bcftools view -c1 -s $sample {params.vep_renamed}  | \
+			bcftools +split-vep -f $split_string1$split_string2$split_string3'\\n' -d -A tab | \
+			awk -v var="$sample"  -F $'\t' 'BEGIN {{OFS = FS}} {{print var, $0 }}' >> {output}
+		done
+		#rm -f {params.vep_renamed}
+		"""
+
+
+
+rule ReformatVEP_For_RVAS:
+	input:
+		"results/vep/annotated_{contig}.vcf.gz"
+	output:
+		"results/for_RVAS/annotated_split_vep_{contig}.tsv"
+	params:
+		partition=config["medium"],
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	resources: cpus=1, mem_mb=9000, time_job=1400
+	shell:
+		"""
+		bcftools +split-vep -l {input} | cut -f2 | tr '\\n' ';' | awk 'BEGIN {{ FS = ";"}} ;{{ print "ID;"$0}}' > {output}
+		bcftools +split-vep -d -f'%CHROM:%POS:%REF:%ALT;%CSQ\n' -A ";" {input} >> {output}
+		"""
+
+
+rule MakeRegenieAnnoFiles:
+	input:
+		"results/for_RVAS/annotated_split_vep_{contig}.tsv"
+	output:
+		"results/for_RVAS/{contig}.anno.file.txt",
+		"results/for_RVAS/{contig}.aaf.file.txt",
+		"results/for_RVAS/{contig}.set.list.txt",
+		"results/for_RVAS/{contig}.vars_cat.tsv",
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"]
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	script:
+		"scripts/make_aaf_anno.R"
+
+
+rule MergeRegenieAnnoFiles:
+	input:
+		expand("results/for_RVAS/{contig}.{filetype}.txt",contig=config["contigs"], allow_missing=True)
+	output:
+		"results/for_RVAS/all_contigs_{filetype}.txt"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"]
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	shell:
+		"cat {input} > {output}"
+
+
+
+
+rule GetMAF_GnomAD3_ForQC:
+	input:
+		"results/vep/annotated_{contig}.vcf.gz"
+	output:
+		"results/maf_comp/afs_{contig}.tsv.gz"
+	resources: cpus=1, mem_mb=18000, time_job=720
+	params:
+		partition=config["medium"]
+	conda:
+		"envs/bcftools_plink_R_bedtools.yaml"
+	shell:
+		"""
+		bcftools view --min-ac 1 {input} | \
+		bcftools +fill-tags | \
+		bcftools +split-vep -f "%CHROM\t%ID\t%MAF\t%AN\t%gnomAD_ge_AF\t%gnomAD_ge_AF_nfe\t%gnomAD_ge_AC\n" --select worst:any |
+		gzip > {output}
+		"""
+
+# END # ANNOTATION ####################################################################################################################################
 
 
 
@@ -1253,7 +1672,7 @@ rule dev_test_rvtest:
                 partition=config["medium"],
 
 
-rule calc_freq_plink:
+rule CalcFreqPlink:
         input:
                 fam="results/var_sets/EURs_unrel/general.fam",
                 bim="results/var_sets/EURs_unrel/general.bim",
@@ -1275,11 +1694,11 @@ rule calc_freq_plink:
                 plink2 --bfile {params.plink_in_prefix} --freq counts --out {params.ac_out_prefix}
                 """
 
-rule merge_aaf_files_data_anno:
+rule MergeAafFilesDataAnno:
         input:
                 data_af_file="results/RVAS/plink_freq.afreq",
                 data_ac_file="results/RVAS/plink_freq.acount",
-                regenie_aaf_file=config["annotations_dir"]+"all_contigs_aaf.file.txt",
+                regenie_aaf_file="results/for_RVAS/all_contigs_aaf.file.txt",
         output:
                 data_anno_aaf_file="results/RVAS/data.anno.aaf.file.txt"
         resources: cpus=4, mem_mb=32000, time_job=720
@@ -1309,9 +1728,9 @@ rule plink_subset_for_rvtest:
                 fam="results/var_sets/EURs_unrel/general.fam",
                 bim="results/var_sets/EURs_unrel/general.bim",
                 bed="results/var_sets/EURs_unrel/general.bed",
-                regenie_anno_file=config["annotations_dir"]+"all_contigs_anno.file.txt",
+                regenie_anno_file="results/for_RVAS/all_contigs_anno.file.txt",
                 data_anno_aaf_file="results/RVAS/data.anno.aaf.file.txt",
-#                regenie_aaf_file=config["annotations_dir"]+"all_contigs_aaf.file.txt",
+#                regenie_aaf_file="results/for_RVAS/all_contigs_aaf.file.txt",
                 regenie_mask_def="resources/mask_definition.mask",
         output:
                 expand("results/rvtests/var_subsets/{mask}_{af_cutoff}.{suffix}",
@@ -1469,7 +1888,7 @@ rule rvtest_SKAT_regional:
 # END # REGIONAL TESTS #####################################################################################################################################
 # START # GENOME SCANNING #####################################################################################################################################
 
-rule genome_scan:
+rule GenomeScan:
         input:
                 phenofam="results/rvtests/pheno_{population}_{pheno}.tsv",
                 bim="results/var_sets/EURs_unrel/general.bim",
@@ -1503,35 +1922,12 @@ rule genome_scan:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # END # GENOME SCANNING #####################################################################################################################################
+
+
+
+
+
 # START # OLD / ARRAY based QC #####################################################################################################################################
 
 
