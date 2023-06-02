@@ -1,0 +1,3 @@
+jobs: 250
+default-resources: [partition=short, cpus=1, mem_mb=5000, time_job=480, additional=""]
+cluster: "sbatch --account=ag_ihg_ludwig -p {params.partition} --time={resources.time_job} --mem={resources.mem_mb} -n {resources.cpus} {resources.additional} --ntasks-per-core=1"

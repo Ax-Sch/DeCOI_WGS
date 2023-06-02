@@ -1,17 +1,20 @@
 echo "Setting up Spark Cluster."
 
+# ADJUST THESE PATHS:
 spark_master_path="/home/aschmidt/spark-3.1.1-bin-hadoop3.2/sbin/start-master.sh"
 spark_worker_path="/home/aschmidt/spark-3.1.1-bin-hadoop3.2/sbin/start-worker.sh"
 slurm_id=""
 
 export LC_ALL="en_US.UTF-8"
 #export PATH=$(echo "$PATH" | sed -e "s>/gpfs01/share/conda/condabin:/gpfs01/share/conda/bin:>>")
+
+# ADJUST THIS PATH:
 export PYTHONPATH="/home/aschmidt/miniconda3/lib/python3.9/site-packages"
 HAIL_HOME=$(pip3 show hail | grep Location | awk -F' ' '{print $2 "/hail"}')
 export SPARK_CLASSPATH=$HAIL_HOME"/backend/hail-all-spark.jar"		
 #SPARK_LOCAL_DIRS=$TMPDIR
 
-# If variables are not set, assign default values
+# If variables are not set, assign default values; potentially MODIFY to the queue name / constraints of your slurm settings:
 queue=${queue:-medium}
 hours_to_run=${hours_to_run:-48}
 num_workers=${num_workers:-5}
@@ -29,6 +32,8 @@ $spark_master_path
 
 echo "Add addtitional workers, save job-ids and add a bash trap to cancel them, when this process stops"
 
+# you somehow need to figure out the network-address of your master node (this job here). The network address is needed for the communication between master and slaves.
+# The part "spark://${SLURMD_NODENAME}.hpc.uni-bonn:7077" has to be set to your [master-network-address], e.g.: spark://[master-network-address]:7077
 for i in $(seq 1 $num_workers)
 do
    slurm_id="$slurm_id "$(sbatch --time=${hours_to_run}:00:00 -J spark_worker --ntasks=1 --partition="$queue" \
@@ -57,7 +62,7 @@ first_job_active=$(sacct | \
 { grep "RUNNING" || true; } | wc -l)
 done
 
-
+# MODIFY the last line as above (see line 36).
 spark_submit_command="spark-submit \
 --jars $HAIL_HOME/backend/hail-all-spark.jar \
 --conf spark.driver.extraClassPath=$HAIL_HOME/backend/hail-all-spark.jar \
