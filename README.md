@@ -27,7 +27,7 @@ Note that this environment is being created to be able to set up a Apache Spark 
 	cd ~/scratch/spark
 	wget https://archive.apache.org/dist/spark/spark-3.1.1/spark-3.1.1-bin-hadoop3.2.tgz
 	tar zxvf spark-3.1.1-bin-hadoop3.2.tgz
-	git clone https://github.com/hail-is/hail.git
+	git clone --branch 0.2.93 https://github.com/hail-is/hail.git
 	cd hail/hail
 	make install-on-cluster HAIL_COMPILE_NATIVES=1 SCALA_VERSION=2.12.13 SPARK_VERSION=3.1.1
 	pip install pyspark==3.1.1
