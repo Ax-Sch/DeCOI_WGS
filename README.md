@@ -21,7 +21,7 @@ Two conda environments were manually created:
 Note that this environment is being created to be able to set up a Apache Spark cluster on top of slurm which can then be used by hail. This will probably need some testing. If running hail on a single node is enough, you could simply install hail via conda (e.g. just run the first two commands from below and then run "conda install -c bioconda hail"). You could then set the variable cluster to "no" in config/config.yaml.
 
 ```
-	conda env update --file env/spark_from_history.yaml
+	conda env update --file workflow/envs/spark_from_history.yaml
 	conda activate spark
 	mkdir -p ~/scratch/spark
 	cd ~/scratch/spark
